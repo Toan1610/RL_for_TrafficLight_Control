@@ -1,0 +1,17 @@
+<configuration>
+    <net-file value="grid4x4.net.xml"/>
+    <output-trip-file value="grid4x4-demo.rou.xml"/>
+    <trip-attributes value="type=&quot;td_0&quot; departLane=&quot;best&quot; departSpeed=&quot;max&quot; departPos=&quot;random&quot;"/>
+    <lanes value="True"/>
+    <!-- <insertion-density value="300.0"/> -->
+    <begin value="0"/>
+    <end value="3600"/>
+    <insertion-rate value="30000"/> 
+    <!-- <insertion-rate value="5000"/>  -->
+    <!-- <insertion-rate value="100,300,500,700,1000,1500,2000,3000,5000,10000,15000,20000,25000,30000,20000,15000,10000,5000,1000,500,200,150,100,50,10,0,0"/> kich ban 3 -->
+    <!-- <insertion-rate value="25000"/> -->
+    <!-- <period value="0.0001"/> -->
+    <binomial value="10"/>
+    <random-depart value="True"/>
+    <seed value="124"/>
+</configuration>

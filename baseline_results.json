@@ -1,0 +1,93 @@
+{
+  "network": "PhuQuoc",
+  "num_episodes": 1,
+  "eval_seeds": [
+    42
+  ],
+  "mean_reward": -3110.522633333153,
+  "std_reward": 0.0,
+  "min_reward": -3110.522633333153,
+  "max_reward": -3110.522633333153,
+  "mean_raw_reward": -3110.522633333153,
+  "std_raw_reward": 0.0,
+  "min_raw_reward": -3110.522633333153,
+  "max_raw_reward": -3110.522633333153,
+  "mean_length": 40.0,
+  "episode_rewards": [
+    -3110.522633333153
+  ],
+  "episode_raw_rewards": [
+    -3110.522633333153
+  ],
+  "episode_lengths": [
+    40
+  ],
+  "per_agent_stats": {
+    "1166229128": {
+      "mean_reward": -343.22042627930625,
+      "std_reward": 0.0,
+      "mean_raw_reward": -343.22042627930625,
+      "std_raw_reward": 0.0
+    },
+    "1166229489": {
+      "mean_reward": -65.63644142895937,
+      "std_reward": 0.0,
+      "mean_raw_reward": -65.63644142895937,
+      "std_raw_reward": 0.0
+    },
+    "1166230678": {
+      "mean_reward": -61.5175178438425,
+      "std_reward": 0.0,
+      "mean_raw_reward": -61.5175178438425,
+      "std_raw_reward": 0.0
+    },
+    "1677153087": {
+      "mean_reward": -339.81560283899273,
+      "std_reward": 0.0,
+      "mean_raw_reward": -339.81560283899273,
+      "std_raw_reward": 0.0
+    },
+    "2763613224": {
+      "mean_reward": -115.1733979016542,
+      "std_reward": 0.0,
+      "mean_raw_reward": -115.1733979016542,
+      "std_raw_reward": 0.0
+    },
+    "357410392": {
+      "mean_reward": -263.96883412003456,
+      "std_reward": 0.0,
+      "mean_raw_reward": -263.96883412003456,
+      "std_raw_reward": 0.0
+    },
+    "445389106": {
+      "mean_reward": -102.54145002365115,
+      "std_reward": 0.0,
+      "mean_raw_reward": -102.54145002365115,
+      "std_raw_reward": 0.0
+    },
+    "95023762": {
+      "mean_reward": -875.7691072612994,
+      "std_reward": 0.0,
+      "mean_raw_reward": -875.7691072612994,
+      "std_raw_reward": 0.0
+    },
+    "J3": {
+      "mean_reward": -566.3322134137147,
+      "std_reward": 0.0,
+      "mean_raw_reward": -566.3322134137147,
+      "std_raw_reward": 0.0
+    },
+    "cluster4558417642_4750216441_4750239705_4750239708": {
+      "mean_reward": -173.7799869932235,
+      "std_reward": 0.0,
+      "mean_raw_reward": -173.7799869932235,
+      "std_raw_reward": 0.0
+    },
+    "junction05": {
+      "mean_reward": -202.7676552284509,
+      "std_reward": 0.0,
+      "mean_raw_reward": -202.7676552284509,
+      "std_raw_reward": 0.0
+    }
+  }
+}

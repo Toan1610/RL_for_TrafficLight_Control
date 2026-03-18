@@ -1,0 +1,13 @@
+<configuration>
+    <net-file value="C:\ITS\TrafficLightControl\Project\trafficlight-algorithm\data\caugiay\usecase_1\caugiay_lang_v2.net.xml"/>
+    <additional-files value="C:\ITS\TrafficLightControl\Project\trafficlight-algorithm\data\caugiay\usecase_1\caugiay.add.xml"/>
+    <output-trip-file value="C:\ITS\TrafficLightControl\Project\trafficlight-algorithm\data\caugiay\usecase_1\caugiay-random.rou.xml"/>
+    <prefix value="r"/>
+    <random-departpos value="True"/>
+    <random-arrivalpos value="True"/>
+    <length value="True"/>
+    <lanes value="True"/>
+    <random value="True"/>
+    <end value="1000.0"/>
+    <insertion-density value="1000.0"/>
+</configuration>

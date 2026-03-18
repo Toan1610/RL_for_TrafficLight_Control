@@ -1,0 +1,7 @@
+# Track entire project except these folders
+.venv/
+mp/venv/
+results_mgmq/
+results_mgmq_test/
+
+mp/data/caugiay/Caugiay_v1/test-motor_2.rou.xml

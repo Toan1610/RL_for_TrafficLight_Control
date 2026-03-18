@@ -1,0 +1,46 @@
+{
+    "sumo": 
+    {
+        "runner": "traci",
+        "sumocfg": "data",
+        "net_file": "data",
+        "rou_file": "data",
+        "detectors_file": "data",
+        "net_info_file": "data",
+        "candidates_file": "data",
+        "begin": 0,
+        "end": 3600,
+        "gui": false,
+        "step_length": 1,
+        "lateral_resolution": 0.3,
+        "sample_interval": 10.0,
+        "time_to_teleport": 500
+    },
+    "controllers": 
+    {
+        "fixed_time": {
+            "name": "fixed_time",
+            "params": {
+                "program_id": "0"
+            }
+        },
+        "max_pressure": {
+            "name": "max_pressure",
+            "params": {
+                "sample_interval": 10.0,
+                "cycling": "exponential",
+                "max_delta_green": 5,
+                "default_no_signal": 0
+            }
+        }
+    },
+    "logging": 
+    {
+        "stdout": true,
+        "save_every_gen": true
+    },
+    "evaluations": ["summary-output", "queue-output"],
+    "system": {
+        "max_processes": 15
+    }
+}

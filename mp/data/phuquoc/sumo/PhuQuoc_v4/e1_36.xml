@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-03-16T19:50:10.932714+07:00 by Eclipse SUMO sumo 1.25.0
+<sumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+
+    <input>
+        <net-file value="data\phuquoc\sumo\PhuQuoc_v4\phuquoc.net.xml"/>
+        <route-files value="data\phuquoc\sumo\PhuQuoc_v4\phuquoc.rou.xml,data\phuquoc\sumo\PhuQuoc_v4\phuquoc-demo.rou.xml"/>
+        <additional-files value="data\phuquoc\sumo\PhuQuoc_v4\detector.add.xml"/>
+    </input>
+
+    <time>
+        <begin value="0"/>
+        <end value="3600"/>
+        <step-length value="1.0"/>
+    </time>
+
+    <processing>
+        <lateral-resolution value="0.3"/>
+        <ignore-route-errors value="true"/>
+        <time-to-teleport value="500"/>
+        <tls.actuated.jam-threshold value="30"/>
+    </processing>
+
+    <routing>
+        <device.rerouting.adaptation-steps value="18"/>
+        <device.rerouting.adaptation-interval value="10"/>
+    </routing>
+
+    <report>
+        <verbose value="true"/>
+        <no-warnings value="true"/>
+        <duration-log.statistics value="true"/>
+        <no-step-log value="true"/>
+    </report>
+
+    <traci_server>
+        <remote-port value="8813"/>
+    </traci_server>
+
+    <gui_only>
+        <gui-settings-file value="data\phuquoc\sumo\PhuQuoc_v4\phuquoc.view.xml"/>
+        <start value="true"/>
+    </gui_only>
+
+</sumoConfiguration>
+-->
+
+<detector xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/det_e1_file.xsd">
+    <interval begin="0.00" end="300.00" id="e1_36" nVehContrib="24" flow="288.00" occupancy="49.49" speed="6.80" harmonicMeanSpeed="0.86" length="4.48" nVehEntered="26"/>
+    <interval begin="300.00" end="600.00" id="e1_36" nVehContrib="23" flow="276.00" occupancy="28.66" speed="6.97" harmonicMeanSpeed="1.54" length="3.78" nVehEntered="25"/>
+    <interval begin="600.00" end="900.00" id="e1_36" nVehContrib="27" flow="324.00" occupancy="27.66" speed="7.11" harmonicMeanSpeed="2.27" length="5.01" nVehEntered="27"/>
+    <interval begin="900.00" end="1200.00" id="e1_36" nVehContrib="29" flow="348.00" occupancy="81.36" speed="4.76" harmonicMeanSpeed="0.80" length="5.38" nVehEntered="30"/>
+    <interval begin="1200.00" end="1500.00" id="e1_36" nVehContrib="27" flow="324.00" occupancy="41.22" speed="7.44" harmonicMeanSpeed="1.51" length="4.55" nVehEntered="31"/>
+    <interval begin="1500.00" end="1800.00" id="e1_36" nVehContrib="19" flow="228.00" occupancy="71.84" speed="6.38" harmonicMeanSpeed="1.80" length="5.32" nVehEntered="22"/>
+    <interval begin="1800.00" end="2100.00" id="e1_36" nVehContrib="1" flow="12.00" occupancy="99.27" speed="0.04" harmonicMeanSpeed="0.04" length="12.00" nVehEntered="1"/>
+    <interval begin="2100.00" end="2400.00" id="e1_36" nVehContrib="2" flow="24.00" occupancy="100.38" speed="2.82" harmonicMeanSpeed="2.81" length="1.60" nVehEntered="2"/>
+    <interval begin="2400.00" end="2700.00" id="e1_36" nVehContrib="3" flow="36.00" occupancy="98.28" speed="3.35" harmonicMeanSpeed="0.06" length="6.83" nVehEntered="3"/>
+    <interval begin="2700.00" end="3000.00" id="e1_36" nVehContrib="1" flow="12.00" occupancy="99.19" speed="0.01" harmonicMeanSpeed="0.01" length="4.50" nVehEntered="1"/>
+    <interval begin="3000.00" end="3300.00" id="e1_36" nVehContrib="1" flow="12.00" occupancy="100.22" speed="2.40" harmonicMeanSpeed="2.40" length="1.60" nVehEntered="1"/>
+    <interval begin="3300.00" end="3600.00" id="e1_36" nVehContrib="0" flow="0.00" occupancy="100.00" speed="-1.00" harmonicMeanSpeed="-1.00" length="-1.00" nVehEntered="0"/>
+</detector>

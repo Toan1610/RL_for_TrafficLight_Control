@@ -1,0 +1,94 @@
+{
+  "checkpoint": "E:\\SUMO\\test1\\RL_algo_for_ITS-master\\results_mgmq\\mgmq_ppo_PhuQuoc_20260313_192127\\MGMQPPO_sumo_mgmq_v0_2d7ac_00000_0_2026-03-13_19-21-35\\checkpoint_000037",
+  "network": "PhuQuoc",
+  "num_episodes": 1,
+  "eval_seeds": [
+    42
+  ],
+  "mean_reward": -3516.0823745349603,
+  "std_reward": 0.0,
+  "min_reward": -3516.0823745349603,
+  "max_reward": -3516.0823745349603,
+  "mean_raw_reward": -3516.0823745349603,
+  "std_raw_reward": 0.0,
+  "min_raw_reward": -3516.0823745349603,
+  "max_raw_reward": -3516.0823745349603,
+  "mean_length": 40.0,
+  "episode_rewards": [
+    -3516.0823745349603
+  ],
+  "episode_raw_rewards": [
+    -3516.0823745349603
+  ],
+  "episode_lengths": [
+    40
+  ],
+  "per_agent_stats": {
+    "1166229128": {
+      "mean_reward": -270.73349975347514,
+      "std_reward": 0.0,
+      "mean_raw_reward": -270.73349975347514,
+      "std_raw_reward": 0.0
+    },
+    "1166229489": {
+      "mean_reward": -208.068488547206,
+      "std_reward": 0.0,
+      "mean_raw_reward": -208.068488547206,
+      "std_raw_reward": 0.0
+    },
+    "1166230678": {
+      "mean_reward": -91.32081477604808,
+      "std_reward": 0.0,
+      "mean_raw_reward": -91.32081477604808,
+      "std_raw_reward": 0.0
+    },
+    "1677153087": {
+      "mean_reward": -352.2793388187881,
+      "std_reward": 0.0,
+      "mean_raw_reward": -352.2793388187881,
+      "std_raw_reward": 0.0
+    },
+    "2763613224": {
+      "mean_reward": -28.400468232296397,
+      "std_reward": 0.0,
+      "mean_raw_reward": -28.400468232296397,
+      "std_raw_reward": 0.0
+    },
+    "357410392": {
+      "mean_reward": -321.2039441347116,
+      "std_reward": 0.0,
+      "mean_raw_reward": -321.2039441347116,
+      "std_raw_reward": 0.0
+    },
+    "445389106": {
+      "mean_reward": -529.6932515740391,
+      "std_reward": 0.0,
+      "mean_raw_reward": -529.6932515740391,
+      "std_raw_reward": 0.0
+    },
+    "95023762": {
+      "mean_reward": -752.8997217603022,
+      "std_reward": 0.0,
+      "mean_raw_reward": -752.8997217603022,
+      "std_raw_reward": 0.0
+    },
+    "J3": {
+      "mean_reward": -608.1024171531193,
+      "std_reward": 0.0,
+      "mean_raw_reward": -608.1024171531193,
+      "std_raw_reward": 0.0
+    },
+    "cluster4558417642_4750216441_4750239705_4750239708": {
+      "mean_reward": -167.3912260435522,
+      "std_reward": 0.0,
+      "mean_raw_reward": -167.3912260435522,
+      "std_raw_reward": 0.0
+    },
+    "junction05": {
+      "mean_reward": -185.98920374140144,
+      "std_reward": 0.0,
+      "mean_raw_reward": -185.98920374140144,
+      "std_raw_reward": 0.0
+    }
+  }
+}

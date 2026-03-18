@@ -1,0 +1,10 @@
+2025-08-26 06:31:38 [INFO] MainProcess choose_atsc_pbil.cli.run_custom: ========== Starting CUSTOM ==========
+2025-08-26 06:31:38 [ERROR] MainProcess choose_atsc_pbil.cli.run_custom: Missing file: [Errno 2] No such file or directory: 'configs/config.json'
+Traceback (most recent call last):
+  File "E:\VTS\ITS\Choose ATSC\Software\choose_ATSC_PBIL\src\choose_atsc_pbil\cli\run_custom.py", line 34, in main
+    cfg = _load_config(args.config)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\VTS\ITS\Choose ATSC\Software\choose_ATSC_PBIL\src\choose_atsc_pbil\cli\run_custom.py", line 10, in _load_config
+    with open(path, "r", encoding="utf-8") as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'configs/config.json'

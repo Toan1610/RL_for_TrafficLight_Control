@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2025-10-13 09:30:35 by Eclipse SUMO netedit Version 1.22.0
+-->
+
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <!-- VTypes -->
+    <vType id="bus" length="12.00" minGap="3.00" maxSpeed="16.67" speedFactor="normc(0.95,0.10,0.80,1.10)" vClass="bus" emissionClass="HBEFA3/Bus" width="2.50" height="3.20" color="blue" personCapacity="80" containerCapacity="0" boardingDuration="3.00" loadingDuration="15.00" laneChangeModel="SL2015" lcStrategic="0.8" lcCooperative="1.2" lcSpeedGain="0.8" lcKeepRight="1.2" lcSublane="0.5" lcPushy="0.3" lcAssertive="0.8" lcImpatience="0.1" lcTimeToImpatience="60.0" lcAccelLat="1.0" lcTurnAlignmentDistance="40.0" accel="1.2" decel="3.5" emergencyDecel="4.0" apparentDecel="2.5" sigma="0.3" tau="1.2"/>
+    <vType id="car" length="4.50" minGap="2.00" maxSpeed="22.22" speedFactor="normc(1.00,0.15,0.70,1.30)" vClass="passenger" emissionClass="HBEFA3/PC_G_EU5" width="1.80" height="1.50" color="white" laneChangeModel="SL2015" lcStrategic="1.0" lcCooperative="1.0" lcSpeedGain="1.0" lcKeepRight="1.0" lcSublane="1.0" lcPushy="0.5" lcAssertive="1.0" lcImpatience="0.3" lcTimeToImpatience="20.0" lcAccelLat="1.5" lcTurnAlignmentDistance="25.0" accel="2.0" decel="4.0" emergencyDecel="5.0" apparentDecel="3.0" sigma="0.5" tau="1.0"/>
+    <vType id="motorbike" length="2.20" minGap="1.00" maxSpeed="16.67" speedFactor="normc(1.10,0.20,0.80,1.40)" vClass="motorcycle" emissionClass="HBEFA3/PC_G_EU4" width="0.80" height="1.50" color="yellow" laneChangeModel="SL2015" lcStrategic="2.0" lcCooperative="0.3" lcSpeedGain="2.0" lcKeepRight="0.2" lcSublane="2.0" lcPushy="1.5" lcAssertive="2.0" lcImpatience="0.8" lcTimeToImpatience="10.0" lcAccelLat="2.0" lcTurnAlignmentDistance="15.0" accel="2.5" decel="4.5" emergencyDecel="6.0" apparentDecel="3.5" sigma="0.8" tau="0.8"/>
+    <vType id="truck" length="8.00" minGap="2.50" maxSpeed="19.44" speedFactor="normc(0.90,0.10,0.70,1.10)" vClass="truck" emissionClass="HBEFA3/HDV" width="2.20" height="2.80" color="green" containerCapacity="20" laneChangeModel="SL2015" lcStrategic="0.6" lcCooperative="1.0" lcSpeedGain="0.6" lcKeepRight="1.0" lcSublane="0.5" lcPushy="0.2" lcAssertive="0.6" lcImpatience="0.1" lcTimeToImpatience="120.0" lcAccelLat="0.8" lcTurnAlignmentDistance="50.0" accel="1.0" decel="3.0" emergencyDecel="3.5" apparentDecel="2.0" sigma="0.3" tau="1.5"/>
+    <vTypeDistribution id="td_0" vTypes="DEFAULT_BIKETYPE bus motorbike car truck" probabilities="0.10 0.10 0.40 0.30 0.10"/>
+    <!-- Vehicles, persons and containers (sorted by depart) -->
+    <flow id="f_0" type="td_0" begin="0.00" departLane="random" departPos="random" arrivalPos="random" from="116432101#0" to="116432101" end="1000" vehsPerHour="1800"/>
+    <flow id="f_2" type="td_0" begin="0.00" departLane="random" departPos="random" arrivalPos="random" from="116432101#0" to="116432101#7" end="1000" vehsPerHour="400"/>
+    <flow id="f_1" type="td_0" begin="500" departLane="random" departPos="random" arrivalPos="random" from="116432101" to="116432101#7" end="1000.00" vehsPerHour="3000"/>
+</routes>
