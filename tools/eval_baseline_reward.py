@@ -195,9 +195,39 @@ class MaxPressureNativeBaselineController:
         applied = 0
         t_now = float(self.simulator.get_sim_time())
 
-        # Catch up periodic sampling on the same schedule as MP runner.
+        # Reconstruct true historical occupancy from TrafficSignal objects
+        # instead of error-prone point-in-time sampling catch-up
+        for edge_id, edge_info in self.controlled_edges.items():
+            detectors = (edge_info or {}).get("detector") or []
+            
+            edge_series = None
+            if detectors:
+                # Find the traffic signal that owns this edge's detectors
+                owner_ts = None
+                for ts in traffic_signals.values():
+                    if detectors[0] in getattr(ts, 'detectors_e2', []):
+                        owner_ts = ts
+                        break
+                        
+                if owner_ts and hasattr(owner_ts, 'detector_history'):
+                    # Extract history for all detectors on this edge and average them
+                    hist_len = len(owner_ts.detector_history.get("occupancy", {}).get(detectors[0], []))
+                    if hist_len > 0:
+                        edge_series = []
+                        for i in range(hist_len):
+                            step_vals = []
+                            for d in detectors:
+                                d_hist = owner_ts.detector_history.get("occupancy", {}).get(d, [])
+                                if i < len(d_hist):
+                                    step_vals.append(d_hist[i] * 100.0)  # scale back to [0..100] for original MP
+                            edge_series.append(float(np.mean(step_vals)) if step_vals else 0.0)
+            
+            if edge_series is None:
+                edge_series = [0.0]
+                
+            self.cache_edges_occupancy[edge_id] = edge_series
+
         while t_now >= self.next_sample_time:
-            self._collect_data()
             self.next_sample_time += float(self.sample_interval)
 
         for ts_id, ts in traffic_signals.items():

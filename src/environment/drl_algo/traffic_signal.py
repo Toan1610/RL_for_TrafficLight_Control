@@ -329,8 +329,7 @@ class TrafficSignal:
             self._last_sampling_time = current_time
             
             # Số lượng mẫu tối đa để giữ trong cửa sổ delta_time
-            # max_samples = max(1, int(self.aggregation_interval_s / self.sampling_interval_s))
-            max_samples = 5
+            max_samples = max(1, int(self.aggregation_interval_s / self.sampling_interval_s))
             
             # Define metrics and their compute functions for detectors
             detector_metrics = [

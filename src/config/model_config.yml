@@ -74,25 +74,25 @@ mgmq:
 ppo:
   # Section 9.4: Standard lr, no need to separate Actor/Critic
   learning_rate: 0.0003 # 3e-4 standard PPO learning rate
-  # Section 9.5: gamma=0.995 for 90s cycle (0.995^90 ≈ 0.64, preserves long-term signal)
-  gamma: 0.995 # Discount factor (CRITICAL for 90s action duration)
+  # Slightly lower gamma to improve credit assignment speed in long-cycle control.
+  gamma: 0.995 # Discount factor
   lambda_: 0.95 # GAE lambda
-  # Section 9.6: Entropy coefficient for Dirichlet - not too high (collapse), not too low
-  entropy_coeff: 0.01 # Entropy coefficient (max 0.02, never > 0.05)
+  # Reduce exploration noise to help policy exploit stable countdown adjustments sooner.
+  entropy_coeff: 0.01 # Entropy coefficient
   clip_param: 0.2 # Standard PPO clip parameter
   # KL constraint prevents policy jump with large updates
   kl_coeff: 0.1 # Initial KL penalty coefficient (do NOT set to 0)
   kl_target: 0.03 # KL target - relaxed from 0.01 to prevent kl_coeff explosion (25x)
   # vf_clip_param: must be >= max episode return. With hybrid-waiting-pressure,
   # episode returns can reach ~100+. Too small (10.0) prevents VF from learning.
-  vf_clip_param: 200.0 # Value function clip (set >= max expected episode return)
+  vf_clip_param: 10.0 # Value function clip (set >= max expected episode return)
   # Section 9.4: vf_loss_coeff=1.0 so Critic learns fast enough
   vf_loss_coeff: 1.0 # Value loss coefficient (Critic must learn quickly)
   # With num_seconds=3600, cycle_time=90: ~40 steps/episode, 16 agents
   # 1 episode = 40*16 = 640 agent_steps. 4 episodes = 2560
   # Heavy traffic (36k veh) is slow to simulate → keep batch small to avoid timeout
-  train_batch_size: 4640 # 4 episodes/batch: 40steps * 16agents = 640/ep
-  minibatch_size: 640 # SGD minibatch size
+  train_batch_size: 6960 # 4 episodes/batch: 40steps * 16agents = 640/ep
+  minibatch_size: 870 # SGD minibatch size
   num_sgd_iter: 5 # Number of SGD epochs per training batch
   grad_clip: 10.0 # Gradient clipping (standard for GNN models)
 
@@ -134,12 +134,12 @@ reward:
   functions:
     #- hybrid-waiting-pressure
     #- cycle-diff-waiting-time
-    - cycle-diff-waiting-time
-    - presslight-pressure
-    #- halt-veh-by-detectors
-    #- diff-waiting-time
-    #- diff-departed-veh
-  weights: [1, 0.3] # Weights for each reward function (must match functions list)
+    #- cycle-diff-waiting-time
+    #- presslight-pressure
+    - diff-departed-veh
+    - halt-veh-by-detectors
+    - diff-waiting-time
+  weights: [1.0, 0.7, 0.5] # Weights for each reward function (must match functions list)
 
 # ============================================
 # Action Configuration
@@ -161,9 +161,9 @@ action:
 # ============================================
 environment:
   num_seconds: 3600 # Simulation duration (30 minutes)
-  max_green: 63     # Max green per phase: total_green(78s) - 3*min_green(5s) = 63s
+  max_green: 63     # With cycle_time=90 and yellow=3 (4 phases): total_green=72s, max_green=72-3*5=57s
   min_green: 5      # Minimum green time per phase (SUMO actual minimum: 6s)
-  cycle_time: 90    # Traffic light cycle time = confirmed from net.xml (all 33 nodes = 90s)
+  cycle_time: 90   # Shorter cycle for faster reaction and denser learning signal
   yellow_time: 3    # Yellow time per transition = confirmed from net.xml (3s each)
   time_to_teleport: 500 # Teleport stuck vehicles (-1 to disable)
   use_phase_standardizer: true # Map 4-value action to signal phases
