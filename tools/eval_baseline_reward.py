@@ -1,16 +1,19 @@
 """Baseline reward evaluation for fixed-time or MaxPressure controllers.
 
 This script evaluates non-RL baselines using the SAME environment/reward setup
-as training and RL evaluation. It supports two baseline modes:
+as training and RL evaluation. It supports baseline modes:
 
 - ``fixed``: SUMO default traffic light program (fixed-time)
-- ``max_pressure``: MaxPressure controller using ``mp/data/**/net-info.json``
+- ``max_pressure_native``: MP original controller imported from ``mp/src``
+- ``max_pressure_legacy``: legacy in-script controller (for A/B checks)
+- ``max_pressure``: backward-compat alias of ``max_pressure_native``
 """
 
 import os
 import sys
 import json
 import argparse
+import importlib.util
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
@@ -45,6 +48,172 @@ def _resolve_eval_seeds(num_episodes: int, seeds: Optional[List[int]]) -> List[i
 def _load_json(path: Path) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _load_mp_native_maxpressure_class(project_root: Path):
+    """Load MP original MaxPressure class from mp/src as a submodule of root src package."""
+    try:
+        import src as root_src
+    except Exception as exc:
+        raise ImportError("Could not import root 'src' package before loading MP native controller") from exc
+
+    controller_pkg_name = "src.controller"
+    controller_init = project_root / "mp" / "src" / "controller" / "__init__.py"
+    if not controller_init.exists():
+        raise FileNotFoundError(f"MP controller package not found: {controller_init}")
+
+    if controller_pkg_name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            controller_pkg_name,
+            controller_init,
+            submodule_search_locations=[str(controller_init.parent)],
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not build import spec for {controller_pkg_name}")
+        controller_module = importlib.util.module_from_spec(spec)
+        sys.modules[controller_pkg_name] = controller_module
+        setattr(root_src, "controller", controller_module)
+        spec.loader.exec_module(controller_module)
+
+    # Imported after src.controller exists.
+    from src.controller.maxpressure.max_pressure import MaxPressure  # type: ignore
+
+    return MaxPressure
+
+
+class _MPNativeIfaceAdapter:
+    """Adapter that exposes MP-native traci-like methods on top of RL simulator."""
+
+    def __init__(self, simulator: Any):
+        self.simulator = simulator
+        if getattr(simulator, "sumo", None) is None:
+            raise RuntimeError("Simulator SUMO handle is not available")
+
+    def _sumo(self):
+        # SUMO connection object is replaced on env reset, so always resolve lazily.
+        sumo = getattr(self.simulator, "sumo", None)
+        if sumo is None:
+            raise RuntimeError("Simulator SUMO handle is not available")
+        return sumo
+
+    def get_lanearea_occupancy(self, detector_id: str) -> float:
+        return float(self.simulator.get_detector_occupancy(detector_id))
+
+    def get_tls_splits(self, tls_id: str):
+        return self._sumo().trafficlight.getCompleteRedYellowGreenDefinition(tls_id)[0]
+
+    def set_tls_splits(self, tls_id: str, splits):
+        self._sumo().trafficlight.setCompleteRedYellowGreenDefinition(tls_id, splits)
+
+
+class MaxPressureNativeBaselineController:
+    """Run MP original MaxPressure controller inside RL evaluation loop."""
+
+    def __init__(
+        self,
+        simulator: Any,
+        net_info: dict,
+        active_ts_ids: List[str],
+        project_root: Path,
+        cycling: str = "exponential",
+        sample_interval: float = 10.0,
+    ):
+        MaxPressure = _load_mp_native_maxpressure_class(project_root)
+
+        self.simulator = simulator
+        self.net_info = net_info
+        self.iface = _MPNativeIfaceAdapter(simulator)
+        self.sample_interval = max(1, int(round(float(sample_interval))))
+        self.next_sample_time = float(self.simulator.get_sim_time()) + float(self.sample_interval)
+
+        self.controllers: Dict[str, Any] = {}
+        self.cycle_times: Dict[str, float] = {}
+        self.triggers: Dict[str, float] = {}
+        self.cache_edges_occupancy: Dict[str, List[float]] = {}
+        self.controlled_edges: Dict[str, dict] = {}
+
+        tls_dict = (net_info or {}).get("tls", {})
+        for ts_id in active_ts_ids:
+            tls_info = tls_dict.get(ts_id)
+            if not tls_info:
+                continue
+            ctrl = MaxPressure(
+                tls_id=ts_id,
+                iface=self.iface,
+                tls_info=tls_info,
+                sample_interval=float(sample_interval),
+                cycling=cycling,
+            )
+            ctrl.start()
+            self.controllers[ts_id] = ctrl
+
+            cycle = float(tls_info.get("cycle", 0.0))
+            if cycle <= 0:
+                cycle = float(getattr(simulator.traffic_signals.get(ts_id), "delta_time", 90.0))
+            self.cycle_times[ts_id] = cycle
+
+            t_now = float(self.simulator.get_sim_time())
+            self.triggers[ts_id] = t_now + cycle
+
+            for edge_id, edge_info in (tls_info.get("edges") or {}).items():
+                if edge_id not in self.controlled_edges:
+                    self.controlled_edges[edge_id] = edge_info
+
+    def _collect_data(self) -> None:
+        for edge_id, edge_info in self.controlled_edges.items():
+            occ_values = []
+            detectors = (edge_info or {}).get("detector") or []
+            if not detectors:
+                occ_values.append(0.0)
+            for det_id in detectors:
+                try:
+                    occ_values.append(float(self.iface.get_lanearea_occupancy(det_id)))
+                except Exception:
+                    continue
+            mean_occ = float(np.mean(occ_values)) if occ_values else 0.0
+            series = self.cache_edges_occupancy.setdefault(edge_id, [])
+            series.append(mean_occ)
+            if len(series) > 20:
+                self.cache_edges_occupancy[edge_id] = series[-20:]
+
+    def reset_runtime(self) -> None:
+        """Reset per-episode runtime state after env.reset() recreates SUMO connection."""
+        t_now = float(self.simulator.get_sim_time())
+        self.next_sample_time = t_now + float(self.sample_interval)
+        self.cache_edges_occupancy = {}
+        self.triggers = {ts_id: t_now + cycle for ts_id, cycle in self.cycle_times.items()}
+
+        for ctrl in self.controllers.values():
+            ctrl.start()
+            if hasattr(ctrl, "_calculate_lost_time"):
+                try:
+                    ctrl.lost_time = ctrl._calculate_lost_time()
+                except Exception:
+                    pass
+
+    def apply_for_ready_signals(self, traffic_signals: Dict[str, Any]) -> int:
+        applied = 0
+        t_now = float(self.simulator.get_sim_time())
+
+        # Catch up periodic sampling on the same schedule as MP runner.
+        while t_now >= self.next_sample_time:
+            self._collect_data()
+            self.next_sample_time += float(self.sample_interval)
+
+        for ts_id, ts in traffic_signals.items():
+            if ts_id not in self.controllers or not ts.time_to_act:
+                continue
+            due_time = self.triggers.get(ts_id, t_now)
+            if t_now < due_time:
+                continue
+
+            cycle = self.cycle_times.get(ts_id, 90.0)
+            n_samples = max(1, int(round(cycle / float(self.sample_interval))))
+            next_cycle = self.controllers[ts_id].action(t_now, self.cache_edges_occupancy, n_samples)
+            self.triggers[ts_id] = float(t_now) + float(next_cycle)
+            applied += 1
+
+        return applied
 
 
 def _discover_mp_net_info(
@@ -94,8 +263,8 @@ def _discover_mp_net_info(
     return best_path, best_data
 
 
-class MaxPressureBaselineController:
-    """Simple MaxPressure baseline executor on top of the current simulator."""
+class MaxPressureLegacyBaselineController:
+    """Legacy MaxPressure baseline executor (in-script implementation)."""
 
     def __init__(self, simulator: Any, net_info: dict, active_ts_ids: List[str], cycling: str = "exponential"):
         self.simulator = simulator
@@ -290,14 +459,14 @@ def evaluate_baseline(
     output_file: str = None,
     seeds: list = None,
     config_path: Optional[str] = None,
-    controller: str = "max_pressure",
+    controller: str = "max_pressure_native",
     mp_net_info: Optional[str] = None,
 ):
     """
     Evaluate baseline (no AI) traffic signal control.
     
     Uses the SAME environment as training/evaluation, but without RL policy.
-    Controller can be fixed-time (SUMO default) or MaxPressure.
+    Controller can be fixed-time, MP native, or legacy in-script MaxPressure.
     
     Args:
         network_name: Network name (grid4x4, zurich, etc.)
@@ -307,7 +476,7 @@ def evaluate_baseline(
         output_file: Output file for results
         seeds: List of eval seeds, one episode per seed. If None, generated from num_episodes.
         config_path: Path to model_config.yml
-        controller: Baseline controller ("fixed" or "max_pressure")
+        controller: Baseline controller ("fixed", "max_pressure_native", "max_pressure_legacy")
         mp_net_info: Optional explicit path to MP net-info.json
     """
     seeds = _resolve_eval_seeds(num_episodes, seeds)
@@ -441,13 +610,17 @@ def evaluate_baseline(
             "Using active agents for eval metrics."
         )
 
-    controller_name = (controller or "max_pressure").strip().lower()
-    if controller_name not in {"fixed", "max_pressure"}:
-        raise ValueError("controller must be one of: fixed, max_pressure")
+    controller_name = (controller or "max_pressure_native").strip().lower()
+    if controller_name not in {"fixed", "max_pressure_native", "max_pressure_legacy", "max_pressure"}:
+        raise ValueError("controller must be one of: fixed, max_pressure_native, max_pressure_legacy")
+
+    # Backward-compat alias
+    if controller_name == "max_pressure":
+        controller_name = "max_pressure_native"
 
     mp_controller = None
     mp_net_info_path = None
-    if controller_name == "max_pressure":
+    if controller_name in {"max_pressure_native", "max_pressure_legacy"}:
         mp_net_info_path, mp_net_info_data = _discover_mp_net_info(
             project_root=project_root,
             network_name=network_name,
@@ -459,13 +632,27 @@ def evaluate_baseline(
                 "Could not locate net-info.json for MaxPressure baseline. "
                 "Provide --mp-net-info explicitly."
             )
-        mp_controller = MaxPressureBaselineController(
-            simulator=env.simulator,
-            net_info=mp_net_info_data,
-            active_ts_ids=active_ts_ids,
-        )
+        if controller_name == "max_pressure_native":
+            mp_controller = MaxPressureNativeBaselineController(
+                simulator=env.simulator,
+                net_info=mp_net_info_data,
+                active_ts_ids=active_ts_ids,
+                project_root=project_root,
+            )
+        else:
+            mp_controller = MaxPressureLegacyBaselineController(
+                simulator=env.simulator,
+                net_info=mp_net_info_data,
+                active_ts_ids=active_ts_ids,
+            )
         print(f"[OK] MP net-info: {mp_net_info_path}")
-        print(f"[OK] MP-controlled intersections: {len(mp_controller.tls_cfg)} / {len(active_ts_ids)}")
+        if hasattr(mp_controller, "tls_cfg"):
+            controlled_n = len(mp_controller.tls_cfg)
+        elif hasattr(mp_controller, "controllers"):
+            controlled_n = len(mp_controller.controllers)
+        else:
+            controlled_n = 0
+        print(f"[OK] MP-controlled intersections: {controlled_n} / {len(active_ts_ids)}")
     
     # Evaluation metrics (SAME structure as eval_mgmq_ppo.py)
     episode_rewards = []  # normalized (what training sees)
@@ -481,6 +668,8 @@ def evaluate_baseline(
     
     for ep, eval_seed in enumerate(seeds):
         obs, info = env.reset(seed=eval_seed)
+        if hasattr(mp_controller, "reset_runtime"):
+            mp_controller.reset_runtime()
         # Keep baseline evaluation output clean by default.
         # If needed, enable TS debug logging manually when diagnosing rewards/actions.
 
@@ -670,8 +859,8 @@ if __name__ == "__main__":
                         help="Output file for results (JSON)")
     parser.add_argument("--seeds", type=int, nargs='+', default=None,
                         help="Evaluation seeds, one episode per seed. If omitted, auto-generate from --episodes.")
-    parser.add_argument("--controller", type=str, default="max_pressure",
-                        choices=["max_pressure", "fixed"],
+    parser.add_argument("--controller", type=str, default="max_pressure_native",
+                        choices=["max_pressure_native", "max_pressure_legacy", "max_pressure", "fixed"],
                         help="Baseline controller type")
     parser.add_argument("--mp-net-info", type=str, default=None,
                         help="Optional explicit path to MP net-info.json")
