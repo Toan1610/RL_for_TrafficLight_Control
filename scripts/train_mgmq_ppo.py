@@ -134,48 +134,6 @@ class MGMQStopper(Stopper):
         return False
 
 
-class NormalizerStateCallback:
-    """Callback to save/restore reward normalizer state with checkpoints.
-    
-    This ensures that when training is resumed, the reward normalization
-    statistics (mean, variance, count) are restored to maintain consistency.
-    
-    The normalizer state is saved to a JSON file alongside the mgmq_training_config.json.
-    """
-    
-    def __init__(self, output_dir: Path, experiment_name: str):
-        """
-        Args:
-            output_dir: Base output directory for training results
-            experiment_name: Name of the experiment
-        """
-        self.state_file = output_dir / experiment_name / "normalizer_state.json"
-    
-    def save_state(self, env):
-        """Save normalizer state from environment to file."""
-        try:
-            state = env.get_normalizer_state()
-            if state:
-                self.state_file.parent.mkdir(parents=True, exist_ok=True)
-                with open(self.state_file, 'w') as f:
-                    json.dump(state, f, indent=2)
-                print(f"✓ Saved normalizer state to: {self.state_file}")
-        except Exception as e:
-            print(f"⚠ Warning: Failed to save normalizer state: {e}")
-    
-    def restore_state(self, env):
-        """Restore normalizer state from file to environment."""
-        try:
-            if self.state_file.exists():
-                with open(self.state_file, 'r') as f:
-                    state = json.load(f)
-                env.set_normalizer_state(state)
-                return True
-            return False
-        except Exception as e:
-            print(f"⚠ Warning: Failed to restore normalizer state: {e}")
-            return False
-
 
 def create_mgmq_ppo_config(
     env_config: dict,
@@ -566,7 +524,7 @@ def train_mgmq_ppo(
             "dropout": dropout,
             "window_size": history_length,
             # Local GNN specific params
-            "obs_dim": 48,  # 4 features * 12 detectors
+            "obs_dim": 56,  # 4 features * 12 detectors(48) + 8 green-time ratio features
             "max_neighbors": max_neighbors,
             # Gradient isolation for shared encoder (ablation parameter)
             "vf_share_coeff": vf_share_coeff,

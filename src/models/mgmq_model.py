@@ -233,18 +233,33 @@ class MGMQEncoder(nn.Module):
         self.num_agents = num_agents
         self.gat_output_dim = gat_output_dim
         self.gat_num_heads = gat_num_heads
-        
-        # Assume features are organized by lane (12 lanes)
+
+        # ----- Feature split -----
+        # obs_dim can be either:
+        #   48  (legacy: 4 feats * 12 lanes only)
+        #   56  (new: 48 lane feats + 8 green-time ratio feats)
+        NUM_LANE_FEATURES = 48
+        NUM_GREEN_FEATURES = 8
+
+        if obs_dim >= NUM_LANE_FEATURES + NUM_GREEN_FEATURES:
+            # New format: split lane features from green-time features
+            self.lane_obs_dim = NUM_LANE_FEATURES
+            self.green_time_dim = obs_dim - NUM_LANE_FEATURES  # = 8
+        else:
+            # Legacy format: all features are lane features
+            self.lane_obs_dim = obs_dim
+            self.green_time_dim = 0
+
+        # Assume lane features are organized by 12 lanes
         self.num_lanes = 12
         self._needs_projection = False
-        if obs_dim % self.num_lanes == 0:
-            self.lane_feature_dim = obs_dim // self.num_lanes
+        if self.lane_obs_dim % self.num_lanes == 0:
+            self.lane_feature_dim = self.lane_obs_dim // self.num_lanes  # e.g. 48/12=4
         else:
-            print(f"Warning: Feature dim {obs_dim} not divisible by 12 lanes. Using learned projection.")
+            print(f"Warning: Lane feature dim {self.lane_obs_dim} not divisible by 12 lanes. Using learned projection.")
             self.lane_feature_dim = gat_hidden_dim
             self._needs_projection = True
-            # Learned projection: obs_dim -> 12 * lane_feature_dim
-            self.input_proj = nn.Linear(obs_dim, 12 * self.lane_feature_dim)
+            self.input_proj = nn.Linear(self.lane_obs_dim, 12 * self.lane_feature_dim)
             
         # Layer 1: Dual-Stream GAT for intersection embedding (Lane-level)
         self.dual_stream_gat = DualStreamGATLayer(
@@ -255,47 +270,54 @@ class MGMQEncoder(nn.Module):
             dropout=dropout,
             alpha=0.2
         )
-        
+
         # Layer 2: GraphSAGE + Bi-GRU for network embedding
-        # GAT outputs [12, gat_output_dim * gat_num_heads] per intersection
-        # After MEAN POOLING: gat_output_dim * gat_num_heads
-        gat_per_lane_output = gat_output_dim * gat_num_heads  # e.g., 16*2 = 32
-        gat_total_output = gat_per_lane_output  # NO FLATTEN, USE MEAN POOLING
-        
+        gat_per_lane_output = gat_output_dim * gat_num_heads
+        gat_total_output = gat_per_lane_output  # after mean pooling
+
         self.graphsage_bigru = GraphSAGE_BiGRU(
             in_features=gat_total_output,
             hidden_features=graphsage_hidden_dim,
             gru_hidden_size=gru_hidden_dim,
             dropout=dropout
         )
+
+        # Optional: Green-time context projection
+        # Projects the 8 green-time ratio features into a compact embedding
+        # that is concatenated with the joint embedding (does NOT pass through GAT)
+        if self.green_time_dim > 0:
+            self.green_time_proj = nn.Sequential(
+                nn.Linear(self.green_time_dim, gat_hidden_dim),
+                nn.ReLU(),
+            )
+        else:
+            self.green_time_proj = None
         
         # Store network adjacency matrix (directional: [4, N, N] or simple: [N, N])
         if network_adjacency is not None:
-            # If simple adjacency [N, N], expand to directional [4, N, N]
             if network_adjacency.dim() == 2:
-                # Expand simple adjacency to all 4 directions
                 N = network_adjacency.size(0)
                 network_adjacency_4d = network_adjacency.unsqueeze(0).expand(4, -1, -1).clone()
                 self.register_buffer('network_adj', network_adjacency_4d)
             else:
                 self.register_buffer('network_adj', network_adjacency)
         else:
-            # Default: fully connected for all directions
             N = max(1, num_agents)
-            default_adj = torch.ones(4, N, N)  # [4, N, N]
+            default_adj = torch.ones(4, N, N)
             self.register_buffer('network_adj', default_adj)
-            
-        # Store Lane adjacency matrices separately (Static 12x12)
+
+        # Static lane adjacency matrices (12x12)
         lane_adj_coop = get_lane_cooperation_matrix()
         lane_adj_conf = get_lane_conflict_matrix()
-        
         self.register_buffer('lane_adj_coop', lane_adj_coop)
         self.register_buffer('lane_adj_conf', lane_adj_conf)
-        
+
         # Calculate output dimensions
         self.intersection_emb_dim = gat_total_output
         self.network_emb_dim = graphsage_hidden_dim
-        self.joint_emb_dim = self.intersection_emb_dim + self.network_emb_dim
+        # joint_emb_dim includes green-time projection if present
+        green_emb_dim = gat_hidden_dim if self.green_time_dim > 0 else 0
+        self.joint_emb_dim = self.intersection_emb_dim + self.network_emb_dim + green_emb_dim
         
     @property
     def output_dim(self) -> int:
@@ -324,69 +346,74 @@ class MGMQEncoder(nn.Module):
             Tuple of (joint_embedding, intersection_embedding, network_embedding)
         """
         batch_size = obs.size(0)
-        
+
         # Handle single vs multi-agent observations
         if obs.dim() == 2:
-            # Single agent observation: [batch, obs_dim]
             obs = obs.unsqueeze(1)
             num_agents = 1
         else:
-            # Multi-agent: [batch, num_agents, obs_dim]
             num_agents = obs.size(1)
-            
+
+        # --- Split features ---
+        # obs: [batch, num_agents, obs_dim]
+        if self.green_time_dim > 0:
+            lane_obs = obs[..., :self.lane_obs_dim]   # [batch, agents, 48]
+            green_obs = obs[..., self.lane_obs_dim:]  # [batch, agents, 8]
+        else:
+            lane_obs = obs
+            green_obs = None
+
         # --- Layer 1: Lane-level GAT (Intersection Embedding) ---
-        
-        # Flatten: [batch * num_agents, obs_dim]
-        obs_flat = obs.reshape(-1, self.obs_dim)
-        
+        # Flatten: [batch * num_agents, lane_obs_dim]
+        obs_flat = lane_obs.reshape(-1, self.lane_obs_dim)
+
         # Reshape to 12 lanes: [batch * num_agents, 12, lane_feature_dim]
         if self._needs_projection:
-            # Use learned projection when obs_dim not divisible by 12
             lane_features = self.input_proj(obs_flat).view(-1, 12, self.lane_feature_dim)
-        elif self.obs_dim % 12 == 0:
-            lane_features = obs_flat.view(-1, 12, self.obs_dim // 12)
+        elif self.lane_obs_dim % 12 == 0:
+            lane_features = obs_flat.view(-1, 12, self.lane_obs_dim // 12)
         else:
-            raise ValueError(f"obs_dim {self.obs_dim} must be divisible by 12 for GAT.")
+            raise ValueError(f"lane_obs_dim {self.lane_obs_dim} must be divisible by 12 for GAT.")
 
         # Expand adj matrices
         lane_adj_coop_batch = self.lane_adj_coop.unsqueeze(0).expand(lane_features.size(0), -1, -1)
         lane_adj_conf_batch = self.lane_adj_conf.unsqueeze(0).expand(lane_features.size(0), -1, -1)
-        
+
         # Run Dual-Stream GAT
-        # gat_out: [batch * num_agents, 12, gat_output_dim * heads]
         gat_out = self.dual_stream_gat(lane_features, lane_adj_coop_batch, lane_adj_conf_batch)
-        
-        # MEAN POOLING over lanes to manage dimensionality
-        # gat_out is [batch * num_agents, 12, gat_output_dim * heads]
-        # Mean pooling -> [batch * num_agents, gat_output_dim * heads]
+
+        # MEAN POOLING over lanes: [batch * num_agents, gat_output_dim * heads]
         intersection_emb_pooled = gat_out.mean(dim=1)
-        
-        # Reshape back to [batch, num_agents, emb_dim]
+
+        # Reshape back: [batch, num_agents, emb_dim]
         intersection_emb = intersection_emb_pooled.view(batch_size, num_agents, -1)
-        
+
         # --- Layer 2: Network-level GraphSAGE (Network Embedding) ---
-        
-        # Get network adjacency (directional: [4, N, N])
         if num_agents == 1:
             net_adj = torch.ones(4, 1, 1, device=obs.device)
         else:
             net_adj = self.network_adj[:, :num_agents, :num_agents]
-        
-        # GraphSAGE: Input [batch, N, features], adj [4, N, N]
-        # Returns [batch, num_agents, hidden_features]
+
         network_emb_seq = self.graphsage_bigru(intersection_emb, net_adj)
-        # Mean pooling over agents for network embedding
-        network_emb = network_emb_seq.mean(dim=1)
-        
+        network_emb = network_emb_seq.mean(dim=1)  # [batch, graphsage_hidden]
+
         # Select intersection embedding for specific agent or use mean
         if agent_idx is not None and num_agents > 1:
             agent_intersection_emb = intersection_emb[:, agent_idx, :]
         else:
             agent_intersection_emb = intersection_emb.mean(dim=1)
-        
-        # Joint embedding: concatenate intersection and network embeddings
+
+        # --- Joint Embedding ---
+        # Concatenate intersection + network embeddings
         joint_emb = torch.cat([agent_intersection_emb, network_emb], dim=-1)
-        
+
+        # Append green-time context if present
+        if self.green_time_proj is not None and green_obs is not None:
+            # green_obs: [batch, num_agents, 8] -> mean over agents -> [batch, 8]
+            green_mean = green_obs.mean(dim=1)  # [batch, 8]
+            green_emb = self.green_time_proj(green_mean)  # [batch, gat_hidden_dim]
+            joint_emb = torch.cat([joint_emb, green_emb], dim=-1)
+
         return joint_emb, agent_intersection_emb, network_emb
 
 
@@ -428,7 +455,19 @@ class LocalMGMQEncoder(nn.Module):
         self.obs_dim = obs_dim
         self.max_neighbors = max_neighbors
         self.num_lanes = 12
-        self.lane_feature_dim = obs_dim // self.num_lanes  # 48/12 = 4
+
+        # ----- Feature split (same logic as MGMQEncoder) -----
+        NUM_LANE_FEATURES = 48   # 4 features * 12 lanes
+        NUM_GREEN_FEATURES = 8   # 1 ratio per standard phase
+
+        if obs_dim >= NUM_LANE_FEATURES + NUM_GREEN_FEATURES:
+            self.lane_obs_dim = NUM_LANE_FEATURES
+            self.green_time_dim = obs_dim - NUM_LANE_FEATURES  # = 8
+        else:
+            self.lane_obs_dim = obs_dim
+            self.green_time_dim = 0
+
+        self.lane_feature_dim = self.lane_obs_dim // self.num_lanes  # 48/12 = 4
         
         # Dual-Stream GAT
         self.dual_stream_gat = DualStreamGATLayer(
@@ -458,11 +497,21 @@ class LocalMGMQEncoder(nn.Module):
             max_neighbors=max_neighbors,
             dropout=dropout
         )
+
+        # Optional: Green-time context projection (same as MGMQEncoder)
+        if self.green_time_dim > 0:
+            self.green_time_proj = nn.Sequential(
+                nn.Linear(self.green_time_dim, gat_hidden_dim),
+                nn.ReLU(),
+            )
+        else:
+            self.green_time_proj = None
         
         # Output dimensions
         self.intersection_emb_dim = self.gat_total_output
         self.network_emb_dim = graphsage_hidden_dim
-        self.joint_emb_dim = self.intersection_emb_dim + self.network_emb_dim
+        green_emb_dim = gat_hidden_dim if self.green_time_dim > 0 else 0
+        self.joint_emb_dim = self.intersection_emb_dim + self.network_emb_dim + green_emb_dim
         
     @property
     def output_dim(self) -> int:
@@ -474,28 +523,40 @@ class LocalMGMQEncoder(nn.Module):
         
         Args:
             obs_dict: Dict with keys:
-                - self_features: [B, 48]
-                - neighbor_features: [B, K, 48]
+                - self_features: [B, obs_dim]
+                - neighbor_features: [B, K, obs_dim]
                 - neighbor_mask: [B, K]
                 - neighbor_directions: [B, K] (optional, 0.0=N, 0.25=E, 0.5=S, 0.75=W)
                 
         Returns:
             joint_emb: [B, joint_emb_dim]
         """
-        self_feat = obs_dict["self_features"]         # [B, 48]
-        neighbor_feat = obs_dict["neighbor_features"] # [B, K, 48]
+        self_feat = obs_dict["self_features"]         # [B, obs_dim]
+        neighbor_feat = obs_dict["neighbor_features"] # [B, K, obs_dim]
         mask = obs_dict["neighbor_mask"]              # [B, K]
         neighbor_dirs = obs_dict.get("neighbor_directions", None)  # [B, K] or None
         
         B = self_feat.size(0)
         K = neighbor_feat.size(1)
+
+        # Split features if green time is included
+        if self.green_time_dim > 0:
+            self_lane_feat = self_feat[..., :self.lane_obs_dim]
+            self_green_feat = self_feat[..., self.lane_obs_dim:]
+            neighbor_lane_feat = neighbor_feat[..., :self.lane_obs_dim]
+            neighbor_green_feat = neighbor_feat[..., self.lane_obs_dim:]
+        else:
+            self_lane_feat = self_feat
+            self_green_feat = None
+            neighbor_lane_feat = neighbor_feat
+            neighbor_green_feat = None
         
-        # 1. GAT for self features
-        self_emb = self._run_gat(self_feat)
+        # 1. GAT for self lane features
+        self_emb = self._run_gat(self_lane_feat)
         
-        # 2. GAT for neighbor features
-        neighbor_feat_flat = neighbor_feat.reshape(B * K, -1)
-        neighbor_emb_flat = self._run_gat(neighbor_feat_flat)
+        # 2. GAT for neighbor lane features
+        neighbor_lane_flat = neighbor_lane_feat.reshape(B * K, -1)
+        neighbor_emb_flat = self._run_gat(neighbor_lane_flat)
         neighbor_emb = neighbor_emb_flat.reshape(B, K, -1)
         
         # 3. Spatial Neighbor Aggregation using BiGRU with directional projections
@@ -508,6 +569,18 @@ class LocalMGMQEncoder(nn.Module):
         
         # 4. Joint Embedding
         joint_emb = torch.cat([self_emb, network_emb], dim=-1)
+
+        # 5. Append green-time context if present
+        if self.green_time_proj is not None and self_green_feat is not None:
+            # Aggregate green features: mean of self and valid neighbors
+            # self_green_feat: [B, 8], neighbor_green_feat: [B, K, 8], mask: [B, K]
+            mask_expanded = mask.unsqueeze(-1)  # [B, K, 1]
+            sum_green = self_green_feat + (neighbor_green_feat * mask_expanded).sum(dim=1)
+            count = 1.0 + mask.sum(dim=1, keepdim=True)  # [B, 1]
+            mean_green = sum_green / count  # [B, 8]
+            
+            green_emb = self.green_time_proj(mean_green)  # [B, gat_hidden_dim]
+            joint_emb = torch.cat([joint_emb, green_emb], dim=-1)
         
         return joint_emb
         
@@ -515,7 +588,7 @@ class LocalMGMQEncoder(nn.Module):
         """Apply GAT to features and MEAN POOL.
         
         Args:
-            x: [batch, 48] raw observation (12 lanes * 4 features)
+            x: [batch, 48] pure lane observation (12 lanes * 4 features)
             
         Returns:
             [batch, gat_per_lane_output] mean pooled GAT embedding
@@ -1016,22 +1089,27 @@ class MGMQTorchModel(TorchModelV2, nn.Module):
         # Get joint embedding from MGMQ encoder
         if self.use_local_gnn:
             B = obs.shape[0]
-            # Assumed obs dict layout: self_features(48), neighbor_features(K=4 * 48 = 192), 
+            # Assumed obs dict layout: self_features(lane_dim), neighbor_features(K=4 * lane_dim), 
             # neighbor_mask(4), neighbor_directions(4).
-            # Total obs dim = 48 + 192 + 4 + 4 = 248.
-            if obs.shape[-1] == 248:
+            # Total obs dim = lane_dim + 4*lane_dim + 4 + 4 = 5*lane_dim + 8.
+            # So lane_dim = (obs.shape[-1] - 8) // 5
+            total_dim = obs.shape[-1]
+            if (total_dim - 8) % 5 == 0 and total_dim >= 13: # min 5*1+8=13
+                lane_dim = (total_dim - 8) // 5
                 obs_dict = {
-                    "self_features": obs[:, :48],
-                    "neighbor_features": obs[:, 48:240].view(B, 4, 48),
-                    "neighbor_mask": obs[:, 240:244],
-                    "neighbor_directions": obs[:, 244:]
+                    "self_features": obs[:, :lane_dim],
+                    "neighbor_features": obs[:, lane_dim : lane_dim + 4*lane_dim].view(B, 4, lane_dim),
+                    "neighbor_mask": obs[:, lane_dim + 4*lane_dim : lane_dim + 4*lane_dim + 4],
+                    "neighbor_directions": obs[:, lane_dim + 4*lane_dim + 4:]
                 }
                 joint_emb = self.mgmq_encoder(obs_dict)
             else:
                 # Fallback for testing with wrong environment dim: provide zeros
+                # Assume lane_dim = 48 as default fallback
+                DEFAULT_LANE_DIM = 48
                 obs_dict = {
-                    "self_features": obs[:, :48] if obs.shape[-1] >= 48 else F.pad(obs, (0, 48-obs.shape[-1])),
-                    "neighbor_features": torch.zeros(B, 4, 48, device=obs.device),
+                    "self_features": obs[:, :DEFAULT_LANE_DIM] if total_dim >= DEFAULT_LANE_DIM else F.pad(obs, (0, DEFAULT_LANE_DIM - total_dim)),
+                    "neighbor_features": torch.zeros(B, 4, DEFAULT_LANE_DIM, device=obs.device),
                     "neighbor_mask": torch.zeros(B, 4, device=obs.device),
                     "neighbor_directions": torch.zeros(B, 4, device=obs.device)
                 }

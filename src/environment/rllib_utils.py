@@ -169,13 +169,20 @@ def register_sumo_env(config_dict: Dict[str, Any], env_name: str = "sumo_mgmq_v0
         # When using GESA reward wrapper externally, disable the internal normalizer
         # to avoid double normalization
         if use_gesa_reward:
+            if merged.get("normalize_reward", False):
+                import logging
+                logging.getLogger(__name__).warning(
+                    "[GESA] config 'normalize_reward' is True. Overriding internal "
+                    "normalizer to False to prevent double normalization with GESA wrapper."
+                )
             merged["normalize_reward"] = False
+            
         env = SumoMultiAgentEnv(**merged)
         env = wrap_with_gesa(
             env,
             normalize_obs=use_gesa_obs,
             normalize_reward=use_gesa_reward,
-            clip_rewards=clip_rewards_val if clip_rewards_val else 10.0,
+            clip_rewards=clip_rewards_val if clip_rewards_val is not None else 10.0,
         )
         if use_gesa_reward:
             state_file = merged.get("normalizer_state_file")

@@ -66,7 +66,7 @@ mgmq:
   local_gnn:
     enabled: false # Use LocalMGMQTorchModel
     max_neighbors: 4 # Maximum neighbors (K) for local GNN
-    obs_dim: 48 # 4 features * 12 detectors
+    obs_dim: 56 # 48 lane features (4*12) + 8 green-time ratio features
 
 # ============================================
 # PPO Training Parameters
@@ -81,18 +81,18 @@ ppo:
   entropy_coeff: 0.01 # Entropy coefficient (max 0.02, never > 0.05)
   clip_param: 0.2 # Standard PPO clip parameter
   # KL constraint prevents policy jump with large updates
-  kl_coeff: 0.2 # Initial KL penalty coefficient (do NOT set to 0)
+  kl_coeff: 0.1 # Initial KL penalty coefficient (do NOT set to 0)
   kl_target: 0.03 # KL target - relaxed from 0.01 to prevent kl_coeff explosion (25x)
   # vf_clip_param: must be >= max episode return. With hybrid-waiting-pressure,
   # episode returns can reach ~100+. Too small (10.0) prevents VF from learning.
-  vf_clip_param: 10.0 # Value function clip (set >= max expected episode return)
+  vf_clip_param: 200.0 # Value function clip (set >= max expected episode return)
   # Section 9.4: vf_loss_coeff=1.0 so Critic learns fast enough
   vf_loss_coeff: 1.0 # Value loss coefficient (Critic must learn quickly)
   # With num_seconds=3600, cycle_time=90: ~40 steps/episode, 16 agents
   # 1 episode = 40*16 = 640 agent_steps. 4 episodes = 2560
   # Heavy traffic (36k veh) is slow to simulate → keep batch small to avoid timeout
   train_batch_size: 4640 # 4 episodes/batch: 40steps * 16agents = 640/ep
-  minibatch_size: 512 # SGD minibatch size
+  minibatch_size: 640 # SGD minibatch size
   num_sgd_iter: 5 # Number of SGD epochs per training batch
   grad_clip: 10.0 # Gradient clipping (standard for GNN models)
 
@@ -134,12 +134,12 @@ reward:
   functions:
     #- hybrid-waiting-pressure
     #- cycle-diff-waiting-time
-    #- cycle-diff-waiting-time
-    #- presslight-pressure
-    - halt-veh-by-detectors
-    - diff-waiting-time
-    - diff-departed-veh
-  weights: [0.2, 0.45, 0.35] # Weights for each reward function (must match functions list)
+    - cycle-diff-waiting-time
+    - presslight-pressure
+    #- halt-veh-by-detectors
+    #- diff-waiting-time
+    #- diff-departed-veh
+  weights: [1, 0.3] # Weights for each reward function (must match functions list)
 
 # ============================================
 # Action Configuration

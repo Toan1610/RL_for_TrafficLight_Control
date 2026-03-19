@@ -1767,7 +1767,9 @@ class TrafficSignal:
             # In this case, the history MUST store Vectors (matching compute_current_observation),
             # so the padding must be Vectors, not Dicts.
             if hasattr(self.observation_fn, "compute_current_observation"):
-                obs_dim = 4 * len(self.detectors_e2) if self.detectors_e2 else 48
+                # Kích thước: 48 lane features + 8 green-time features = 56
+                # (4 feats * 12 lanes chuẩn hóa + 8 green-time ratio)
+                obs_dim = 4 * 12 + 8  # = 56 (fixed MGMQ standard)
                 default_obs = np.zeros(obs_dim, dtype=np.float32)
                 return [default_obs for _ in range(window_size)]
             
@@ -1789,7 +1791,8 @@ class TrafficSignal:
                     default_obs = np.zeros((1,), dtype=np.float32)
             else:
                 # No space defined, fallback to estimated size
-                obs_dim = 4 * len(self.detectors_e2) if self.detectors_e2 else 48
+                # 48 lane features + 8 green-time ratio features
+                obs_dim = 4 * 12 + 8  # = 56
                 default_obs = np.zeros((obs_dim,), dtype=np.float32)
                 
             return [default_obs for _ in range(window_size)]
