@@ -146,6 +146,8 @@ def create_mgmq_ppo_config(
     clip_param: float = 0.2,
     kl_coeff: float = 0.2,
     kl_target: float = 0.01,
+    min_kl_coeff: float = 1e-3,
+    fixed_kl_coeff: float = None,
     entropy_coeff: float = 0.01,
     # entropy_coeff_schedule: list = None,
     train_batch_size: int = 3000,
@@ -240,6 +242,13 @@ def create_mgmq_ppo_config(
         # seed: RLlib seeds each worker as seed + worker_index automatically
         .debugging(log_level="WARN", seed=seed)
     )
+
+    # Custom MGMQ PPO options consumed by MGMQPPOTorchPolicy.update_kl.
+    # - min_kl_coeff: floor in adaptive mode
+    # - fixed_kl_coeff: optional constant KL penalty
+    config.min_kl_coeff = min_kl_coeff
+    config.fixed_kl_coeff = fixed_kl_coeff
+
     # CRITICAL FIX: Disable normalize_actions
     # For MaskedSoftmax: outputs valid simplex actions in [0,1]; unsquash would distort them
     # For MaskedMultiCategorical: outputs discrete indices; no normalization needed
@@ -291,6 +300,8 @@ def train_mgmq_ppo(
     clip_param: float = 0.2,
     kl_coeff: float = 0.2,
     kl_target: float = 0.01,
+    min_kl_coeff: float = 1e-3,
+    fixed_kl_coeff: float = None,
     entropy_coeff: float = 0.01,
     # entropy_coeff_schedule: list = None,
     train_batch_size: int = 3000,
@@ -397,6 +408,8 @@ def train_mgmq_ppo(
     print("-"*80)
     print("PPO Hyperparameters:")
     print(f"  gamma: {gamma}, lambda: {lambda_}, clip_param: {clip_param}")
+    print(f"  kl_coeff(init): {kl_coeff}, kl_target: {kl_target}")
+    print(f"  min_kl_coeff: {min_kl_coeff}, fixed_kl_coeff: {fixed_kl_coeff}")
     print(f"  entropy_coeff: {entropy_coeff}")
     # print(f"  entropy_coeff_schedule: {entropy_coeff_schedule}")
     print(f"  train_batch_size: {train_batch_size}, minibatch_size: {minibatch_size}")
@@ -547,6 +560,8 @@ def train_mgmq_ppo(
             clip_param=clip_param,
             kl_coeff=kl_coeff,
             kl_target=kl_target,
+            min_kl_coeff=min_kl_coeff,
+            fixed_kl_coeff=fixed_kl_coeff,
             entropy_coeff=entropy_coeff,
             # entropy_coeff_schedule=entropy_coeff_schedule,
             train_batch_size=train_batch_size,
@@ -561,6 +576,11 @@ def train_mgmq_ppo(
             seed=seed,
             action_mode=action_mode,
         )
+
+        # Ensure custom KL controls are present in the final param_space dict.
+        ppo_param_space = ppo_config.to_dict()
+        ppo_param_space["min_kl_coeff"] = min_kl_coeff
+        ppo_param_space["fixed_kl_coeff"] = fixed_kl_coeff
         
         # Create stopper
         stopper = MGMQStopper(
@@ -592,7 +612,7 @@ def train_mgmq_ppo(
                 trainable="MGMQPPO",
                 resume_unfinished=True,  # Resume trials that haven't finished
                 resume_errored=True,  # Retry trials that errored
-                param_space=ppo_config.to_dict(),  # Allow parameter overrides
+                param_space=ppo_param_space,  # Allow parameter overrides
                 # Override stopper with new iteration count
                 restart_errored=False,  # Don't restart errored trials from scratch
             )
@@ -603,7 +623,7 @@ def train_mgmq_ppo(
             # (includes per-minibatch advantage normalization + clip_fraction tracking)
             tuner = tune.Tuner(
                 "MGMQPPO",
-                param_space=ppo_config.to_dict(),
+                param_space=ppo_param_space,
                 run_config=tune.RunConfig(  # Use tune.RunConfig instead of air.RunConfig
                     name=experiment_name,
                     storage_path=str(storage_path),  # Must be absolute path
@@ -746,9 +766,13 @@ if __name__ == "__main__":
     parser.add_argument("--history-length", type=int, default=None,
                         help="Observation history length (window size)")
     parser.add_argument("--reward-fn", type=str, nargs='+', default=None,
-                        help="Reward function(s) for training. Can specify multiple. Available: diff-waiting-time, queue, average-speed, pressure, halt-veh-by-detectors, diff-departed-veh")
+                        help="Reward function(s) for training. Can specify multiple. Available: diff-waiting-time, cycle-diff-waiting-time, cycle-diff-waiting-time-normalized, queue, average-speed, pressure, presslight-pressure, halt-veh-by-detectors, diff-departed-veh, teleport-penalty")
     parser.add_argument("--reward-weights", type=float, nargs='+', default=None,
                         help="Weights for reward functions. Must match number of reward functions. Default: equal weights.")
+    parser.add_argument("--min-kl-coeff", type=float, default=None,
+                        help="Lower bound for adaptive kl_coeff to prevent underflow. Default: from config (fallback 1e-3)")
+    parser.add_argument("--fixed-kl-coeff", type=float, default=None,
+                        help="Use fixed KL coefficient (disable adaptive KL update). Suggested range: 0.02-0.05")
     
     # Local GNN arguments
     parser.add_argument("--use-local-gnn", action="store_true",
@@ -835,6 +859,8 @@ if __name__ == "__main__":
         clip_param=ppo_cfg["clip_param"],
         kl_coeff=ppo_cfg.get("kl_coeff", 0.2),
         kl_target=ppo_cfg.get("kl_target", 0.01),
+        min_kl_coeff=args.min_kl_coeff if args.min_kl_coeff is not None else ppo_cfg.get("min_kl_coeff", 1e-3),
+        fixed_kl_coeff=args.fixed_kl_coeff if args.fixed_kl_coeff is not None else ppo_cfg.get("fixed_kl_coeff", None),
         entropy_coeff=ppo_cfg.get("entropy_coeff", 0.01),
         # entropy_coeff_schedule=ppo_cfg.get("entropy_coeff_schedule", None),
         train_batch_size=ppo_cfg["train_batch_size"],

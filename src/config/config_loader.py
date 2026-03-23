@@ -114,6 +114,8 @@ def get_ppo_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "clip_param": ppo.get("clip_param", 0.2),
         "kl_coeff": ppo.get("kl_coeff", 0.2),
         "kl_target": ppo.get("kl_target", 0.01),
+        "min_kl_coeff": ppo.get("min_kl_coeff", 1e-3),
+        "fixed_kl_coeff": ppo.get("fixed_kl_coeff", None),
         "vf_clip_param": ppo.get("vf_clip_param", 10.0),
         "vf_loss_coeff": ppo.get("vf_loss_coeff", 1.0),
         "train_batch_size": ppo.get("train_batch_size", 3000),

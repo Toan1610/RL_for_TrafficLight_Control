@@ -84,6 +84,7 @@ def evaluate_mgmq(
     seeds: List[int] = None,
     use_training_config: bool = True,
     config_path: Optional[str] = None,
+    cycle_time_override: Optional[int] = None,
 ):
     """
     Evaluate a trained MGMQ-PPO model.
@@ -97,6 +98,7 @@ def evaluate_mgmq(
         output_file: Output file for results
         seeds: List of eval seeds, one episode per seed. If None, auto-generated from num_episodes.
         use_training_config: Whether to load and use training configuration
+        cycle_time_override: Optional cycle_time override for evaluation environment
     """
     if num_episodes <= 0:
         raise ValueError("num_episodes must be > 0")
@@ -253,6 +255,7 @@ def evaluate_mgmq(
             print(f"  window_size: {env_config['window_size']}")
             print(f"  use_phase_standardizer: {env_config['use_phase_standardizer']}")
             print(f"  use_neighbor_obs: {env_config['use_neighbor_obs']}")
+
         else:
             # Build additional SUMO command with detector file
             # Match training config (0.5s) and apply strict network settings
@@ -298,6 +301,11 @@ def evaluate_mgmq(
                 "action_mode": yaml_action_cfg["action_mode"],
             }
             print("\n✓ Using environment config from YAML defaults")
+
+        # Allow explicit eval-only cycle override while keeping other config intact.
+        if cycle_time_override is not None:
+            env_config["cycle_time"] = int(cycle_time_override)
+            print(f"\n⚠ Overriding cycle_time for evaluation: {env_config['cycle_time']}")
         
         print("")
         
@@ -619,8 +627,12 @@ if __name__ == "__main__":
                         help="Evaluation seeds, one episode per seed. If omitted, auto-generate from --episodes.")
     parser.add_argument("--no-training-config", action="store_true",
                         help="Do not load training config, use defaults")
+    parser.add_argument("--no-tranning-config", dest="no_training_config", action="store_true",
+                        help=argparse.SUPPRESS)
     parser.add_argument("--config", type=str, default=None,
                         help="Path to model_config.yml (default: src/config/model_config.yml)")
+    parser.add_argument("--cycle-time", type=int, default=None,
+                        help="Override environment cycle_time only for evaluation")
     
     args = parser.parse_args()
     
@@ -634,4 +646,5 @@ if __name__ == "__main__":
         seeds=args.seeds,
         use_training_config=not args.no_training_config,
         config_path=args.config,
+        cycle_time_override=args.cycle_time,
     )

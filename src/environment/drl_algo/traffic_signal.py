@@ -155,6 +155,7 @@ class TrafficSignal:
         self.time_since_last_phase_change = 0
         self.next_action_time = begin_time
         self.last_ts_waiting_time = 0.0
+        self._has_waiting_baseline = False
         self.last_reward = None
         self.reward_fn = reward_fn
         self.reward_weights = reward_weights
@@ -181,6 +182,23 @@ class TrafficSignal:
         else:
             self.reward_dim = 1
             self.reward_list = [self._get_reward_fn_from_string(self.reward_fn)]
+
+        if self.reward_weights is not None:
+            if not isinstance(self.reward_weights, (list, tuple, np.ndarray)):
+                raise ValueError("reward_weights must be a list/tuple/ndarray or None")
+
+            # Backward compatibility: single reward with [1.0] weight is valid and equivalent
+            # to no weighting. Keep this path to avoid breaking baseline/eval scripts.
+            if len(self.reward_list) == 1:
+                if len(self.reward_weights) != 1:
+                    raise ValueError(
+                        f"Single reward function expects exactly 1 weight, got {len(self.reward_weights)}"
+                    )
+                self.reward_weights = None
+            elif len(self.reward_weights) != len(self.reward_list):
+                raise ValueError(
+                    f"reward_weights length ({len(self.reward_weights)}) must match reward functions length ({len(self.reward_list)})"
+                )
 
         if self.reward_weights is not None:
             self.reward_dim = 1  # Since it will be scalarized
@@ -827,7 +845,7 @@ class TrafficSignal:
             
             self.last_reward = np.array(rewards_array, dtype=np.float32)
             if self.reward_weights is not None:
-                self.last_reward = np.dot(self.last_reward, self.reward_weights)  # Linear combination of rewards
+                self.last_reward = np.dot(self.last_reward, np.asarray(self.reward_weights, dtype=np.float32))
                 # Ensure final reward is valid
                 if np.isnan(self.last_reward) or np.isinf(self.last_reward):
                     self.last_reward = 0.0
@@ -1017,7 +1035,7 @@ class TrafficSignal:
         Formula:
             reward = (W_before - W_after) + alpha * (-|veh_in - veh_out| / max_veh)
         
-        where alpha=0.5 controls pressure penalty strength.
+        where alpha controls pressure penalty strength.
         
         This forces the agent to both reduce waiting time AND balance flow
         across all directions, avoiding the situation where one direction
@@ -1028,6 +1046,13 @@ class TrafficSignal:
         """
         # Component 1: Waiting time reduction (same as cycle-diff-waiting-time)
         ts_wait = self.get_aggregated_waiting_time()
+
+        # Warm-start baseline: avoid first-cycle bias from initial 0.0 reference.
+        if not self._has_waiting_baseline:
+            self.last_ts_waiting_time = ts_wait
+            self._has_waiting_baseline = True
+            return 0.0
+
         waiting_diff = self.last_ts_waiting_time - ts_wait
         self.last_ts_waiting_time = ts_wait
         
@@ -1039,7 +1064,13 @@ class TrafficSignal:
         out_vehicles = sum(self.data_provider.get_lane_vehicle_count(l) for l in out_lanes)
         
         pressure = abs(in_vehicles - out_vehicles)
-        pressure_penalty = -0.1 * pressure  # alpha = 0.1 (reduced from 0.5 to balance reward scale)
+        if self.max_veh > 0:
+            pressure_norm = min(1.0, pressure / self.max_veh)
+        else:
+            pressure_norm = 0.0
+
+        alpha = 0.3
+        pressure_penalty = -alpha * pressure_norm
         
         return float(waiting_diff + pressure_penalty)
 
@@ -1060,7 +1091,7 @@ class TrafficSignal:
         return self._clip_reward((avg_speed * 6.0) - 3.0)
 
     def _queue_reward(self):
-        """Computes queue-based reward. Range: [-3, 3]."""
+        """Computes queue-based reward. Range: [-3, 0]."""
         total_queued = self.get_aggregated_queued()
         if self.max_veh == 0:
             return 0.0
@@ -1090,6 +1121,12 @@ class TrafficSignal:
         """
         # Tổng thời gian chờ TRUNG BÌNH trong chu kỳ (aggregated over 5 samples)
         ts_wait = self.get_aggregated_waiting_time()
+
+        # Warm-start baseline: avoid first-cycle bias from initial 0.0 reference.
+        if not self._has_waiting_baseline:
+            self.last_ts_waiting_time = ts_wait
+            self._has_waiting_baseline = True
+            return 0.0
         
         # Chênh lệch: dương nếu waiting time giảm (tốt), âm nếu tăng (xấu)
         reward = self.last_ts_waiting_time - ts_wait
@@ -1097,14 +1134,11 @@ class TrafficSignal:
         # Lưu lại để so sánh ở bước tiếp theo
         self.last_ts_waiting_time = ts_wait
         
-        # Chuẩn hóa: max_waiting_change = max_veh * sampling_interval_s
-        # Đây là giá trị tối đa mà một mẫu aggregated có thể có
-        # (mỗi mẫu = sum(vehicles_in_jam * sampling_interval) across detectors)
-        # Giá trị tối đa = max_veh * sampling_interval_s khi tất cả detector đầy xe
-        if self.max_veh > 0 and self.delta_time > 0:
-            # Use delta_time (full cycle length) since get_aggregated_waiting_time()
-            # returns mean waiting time across the entire cycle, not a single sample
-            max_waiting_change = self.max_veh * self.delta_time
+        # get_aggregated_waiting_time() is the mean of per-sample waiting-time values.
+        # Each sample is approximately vehicles_in_jam * sampling_interval_s,
+        # so normalize by max_veh * sampling_interval_s.
+        if self.max_veh > 0 and self.sampling_interval_s > 0:
+            max_waiting_change = self.max_veh * self.sampling_interval_s
             normalized_reward = (reward / max_waiting_change) * 3.0
         else:
             normalized_reward = 0.0
@@ -1130,6 +1164,12 @@ class TrafficSignal:
         """
         # Get total waiting time averaged over the cycle from detector samples
         ts_wait = self.get_aggregated_waiting_time()
+
+        # Warm-start baseline: avoid first-cycle bias from initial 0.0 reference.
+        if not self._has_waiting_baseline:
+            self.last_ts_waiting_time = ts_wait
+            self._has_waiting_baseline = True
+            return 0.0
         
         # reward = W_before - W_after (positive = improvement)
         reward = self.last_ts_waiting_time - ts_wait
@@ -1138,6 +1178,31 @@ class TrafficSignal:
         self.last_ts_waiting_time = ts_wait
         
         return float(reward)
+
+    def _cycle_diff_waiting_time_normalized_reward(self):
+        """Normalized cycle waiting-time difference reward. Range: [-3, 3].
+
+        Uses the same cycle delta as cycle-diff-waiting-time, but rescales to a
+        bounded range so it can be combined more safely with other rewards.
+        """
+        ts_wait = self.get_aggregated_waiting_time()
+
+        # Warm-start baseline: avoid first-cycle bias from initial 0.0 reference.
+        if not self._has_waiting_baseline:
+            self.last_ts_waiting_time = ts_wait
+            self._has_waiting_baseline = True
+            return 0.0
+
+        reward = self.last_ts_waiting_time - ts_wait
+        self.last_ts_waiting_time = ts_wait
+
+        if self.max_veh > 0 and self.sampling_interval_s > 0:
+            max_waiting_change = self.max_veh * self.sampling_interval_s
+            normalized_reward = (reward / max_waiting_change) * 3.0
+        else:
+            normalized_reward = 0.0
+
+        return self._clip_reward(normalized_reward)
 
     def _halt_veh_reward_by_detectors(self):
         """Computes penalty for halting vehicles. Range: [-3.0, 0.0].
@@ -1833,6 +1898,7 @@ class TrafficSignal:
     reward_fns = {
         "diff-waiting-time": _diff_waiting_time_reward,
         "cycle-diff-waiting-time": _cycle_diff_waiting_time_reward,
+        "cycle-diff-waiting-time-normalized": _cycle_diff_waiting_time_normalized_reward,
         "average-speed": _average_speed_reward,
         "queue": _queue_reward,
         "occupancy": _occupancy_reward,

@@ -277,6 +277,30 @@ class MGMQPPOTorchPolicy(PPOTorchPolicy):
         return apply_grad_clipping(self, local_optimizer, loss)
 
     @override(PPOTorchPolicy)
+    def update_kl(self, sampled_kl):
+        """Update KL coefficient with optional floor/fixed overrides.
+
+        Config options:
+        - fixed_kl_coeff: If set, disables adaptive KL and uses this constant.
+        - min_kl_coeff: Lower bound applied after adaptive KL update.
+        """
+        fixed_kl_coeff = self.config.get("fixed_kl_coeff", None)
+        min_kl_coeff = float(self.config.get("min_kl_coeff", 0.0) or 0.0)
+
+        # Fixed mode: keep KL penalty constant to avoid coefficient collapse.
+        if fixed_kl_coeff is not None:
+            self.kl_coeff = float(fixed_kl_coeff)
+            return self.kl_coeff
+
+        # Adaptive mode (RLlib default), then clamp by floor.
+        super().update_kl(sampled_kl)
+
+        if min_kl_coeff > 0.0 and self.kl_coeff < min_kl_coeff:
+            self.kl_coeff = min_kl_coeff
+
+        return self.kl_coeff
+
+    @override(PPOTorchPolicy)
     def stats_fn(self, train_batch: SampleBatch) -> Dict[str, TensorType]:
         """Extended stats function with diagnostic metrics."""
         base_stats = {
