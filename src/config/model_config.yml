@@ -78,21 +78,23 @@ ppo:
   gamma: 0.995 # Discount factor
   lambda_: 0.95 # GAE lambda
   # Reduce exploration noise to help policy exploit stable countdown adjustments sooner.
-  entropy_coeff: 0.01 # Entropy coefficient
+  entropy_coeff: 0.01 # Entropy coefficient (increased from 0.003 to prevent collapse)
   clip_param: 0.2 # Standard PPO clip parameter
   # KL constraint prevents policy jump with large updates
   kl_coeff: 0.1 # Initial KL penalty coefficient (do NOT set to 0)
   kl_target: 0.03 # KL target - relaxed from 0.01 to prevent kl_coeff explosion (25x)
+  min_kl_coeff: 0.005 # Floor for adaptive kl_coeff to prevent collapse to ~0
+  fixed_kl_coeff: null # Set 0.02-0.05 to disable adaptive KL and keep penalty constant
   # vf_clip_param: must be >= max episode return. With hybrid-waiting-pressure,
   # episode returns can reach ~100+. Too small (10.0) prevents VF from learning.
-  vf_clip_param: 10.0 # Value function clip (set >= max expected episode return)
+  vf_clip_param: 40.0 # Value function clip (set >= max expected episode return)
   # Section 9.4: vf_loss_coeff=1.0 so Critic learns fast enough
   vf_loss_coeff: 1.0 # Value loss coefficient (Critic must learn quickly)
   # With num_seconds=3600, cycle_time=90: ~40 steps/episode, 16 agents
   # 1 episode = 40*16 = 640 agent_steps. 4 episodes = 2560
   # Heavy traffic (36k veh) is slow to simulate → keep batch small to avoid timeout
-  train_batch_size: 6960 # 4 episodes/batch: 40steps * 16agents = 640/ep
-  minibatch_size: 870 # SGD minibatch size
+  train_batch_size: 4640 # 4 episodes/batch: 40steps * 16agents = 640/ep
+  minibatch_size: 1160 # SGD minibatch size
   num_sgd_iter: 5 # Number of SGD epochs per training batch
   grad_clip: 10.0 # Gradient clipping (standard for GNN models)
 
@@ -114,33 +116,30 @@ training:
 # ============================================
 reward:
   # Available reward functions:
-  #   - cycle-diff-waiting-time  : W_before - W_after (paper, default)
-  #   - diff-waiting-time        : Normalized waiting time reduction [-3, 3]
+  #   - cycle-diff-waiting-time  : W_before - W_after (raw scale, can be large)
+  #   - cycle-diff-waiting-time-normalized: Normalized cycle waiting delta [-3, 3]
+  #   - diff-waiting-time        : Normalized waiting time reduction [-3, 3] (recommended for PPO)
   #   - pressure                 : Proxy pressure from detectors (occupancy - speed) [-3, 3]
   #   - presslight-pressure      : PressLight |veh_in - veh_out| penalty [-3, 0]
   #   - hybrid-waiting-pressure  : cycle-diff-waiting-time + pressure penalty (SOTA)
   #   - average-speed            : Normalized average speed [-3, 3]
-  #   - queue                    : Queue length penalty [-3, 3]
+  #   - queue                    : Queue length penalty [-3, 0]
   #   - halt-veh-by-detectors    : Halting vehicle penalty [-3, 0]
   #   - diff-departed-veh        : Throughput (departed vehicles) [0, 3]
   #   - teleport-penalty         : Teleportation penalty [-3, 0]
   #
   # Can use a single function or a list with weights:
-  #   functions: [cycle-diff-waiting-time, presslight-pressure]
-  #   weights: [1.0, 0.5]
+  #   functions: [diff-waiting-time, presslight-pressure, diff-departed-veh, teleport-penalty]
+  #   weights: [1.0, 0.5, 0.5, 0.6]
   #
   # Or use the hybrid reward (all-in-one):
   #   functions: [hybrid-waiting-pressure]
   functions:
-    #- hybrid-waiting-pressure
-    #- cycle-diff-waiting-time
-    #- cycle-diff-waiting-time
-    #- presslight-pressure
     - diff-departed-veh
     - halt-veh-by-detectors
-    - diff-waiting-time
-  weights: [1.0, 0.7, 0.5] # Weights for each reward function (must match functions list)
-
+    #- teleport-penalty
+  weights: [0.65, 0.35] # Default stable blend for Zurich high-demand profile
+ 
 # ============================================
 # Action Configuration
 # ============================================
@@ -161,7 +160,7 @@ action:
 # ============================================
 environment:
   num_seconds: 3600 # Simulation duration (30 minutes)
-  max_green: 63     # With cycle_time=90 and yellow=3 (4 phases): total_green=72s, max_green=72-3*5=57s
+  max_green: 65     # With cycle_time=90 and yellow=3 (4 phases): total_green=96s, max_green=96-3*5=81s
   min_green: 5      # Minimum green time per phase (SUMO actual minimum: 6s)
   cycle_time: 90   # Shorter cycle for faster reaction and denser learning signal
   yellow_time: 3    # Yellow time per transition = confirmed from net.xml (3s each)
@@ -169,4 +168,4 @@ environment:
   use_phase_standardizer: true # Map 4-value action to signal phases
   # Section 9.1: Enable reward normalization (ép Value loss về O(1))
   normalize_reward: true # RLlib normalize_rewards = True
-  clip_rewards: 5.0 # Clip normalized rewards to [-10, 10]
+  clip_rewards: 10.0 # Clip normalized rewards to [-10, 10]
