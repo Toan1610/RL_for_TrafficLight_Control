@@ -16,6 +16,12 @@ preprocessing:
   # Maps incoming edges to standard directions (N/E/S/W)
   gpi:
     enabled: true
+    # Keep lane/detector information from all incoming edges when multiple edges
+    # fall into the same cardinal direction bucket.
+    merge_collision_lanes: true
+    # If true, export per-intersection debug info:
+    # incoming_edges, edge_angles, direction_candidates, selected_direction_map.
+    debug_export: false
       
   # FRAP (Feature Relation Attention Processing) configuration  
   # Maps actual signal phases to 8 standard phases

@@ -70,6 +70,10 @@ class IntersectionStandardizer:
         # Cache for computed values
         self._edge_vectors: Dict[str, np.ndarray] = {}
         self._edge_angles: Dict[str, float] = {}
+        self._edge_to_direction: Dict[str, str] = {}
+        self._direction_candidates: Dict[str, List[Tuple[str, float]]] = {
+            'N': [], 'E': [], 'S': [], 'W': []
+        }
         self._mapped = False
         
     def _get_incoming_edges(self) -> List[str]:
@@ -186,6 +190,7 @@ class IntersectionStandardizer:
                 self._edge_angles[edge] = angle
                 
                 direction = self._angle_to_direction(angle)
+                self._edge_to_direction[edge] = direction
                 edge_directions[edge] = (angle, direction)
                 
             except Exception as e:
@@ -202,6 +207,8 @@ class IntersectionStandardizer:
         
         for edge, (angle, direction) in edge_directions.items():
             direction_candidates[direction].append((edge, angle))
+
+        self._direction_candidates = direction_candidates
         
         # Select best edge for each direction
         for direction, candidates in direction_candidates.items():
@@ -286,12 +293,59 @@ class IntersectionStandardizer:
         mapping = self.map_intersection()
         return mapping.get(direction.upper())
 
+    def get_direction_candidates(self) -> Dict[str, List[Tuple[str, float]]]:
+        """Return candidate edges per direction before final selection.
+
+        Returns:
+            Dict direction -> list of (edge_id, angle)
+        """
+        self.map_intersection()
+        return {
+            d: list(cands)
+            for d, cands in self._direction_candidates.items()
+        }
+
     def reset(self):
         """Clear cached mappings (e.g., for new simulation)."""
         self.standard_map = {'N': None, 'E': None, 'S': None, 'W': None}
         self._edge_vectors = {}
         self._edge_angles = {}
+        self._edge_to_direction = {}
+        self._direction_candidates = {'N': [], 'E': [], 'S': [], 'W': []}
         self._mapped = False
+
+    def get_debug_info(self) -> Dict[str, Any]:
+        """Return debug info for GPI mapping decisions.
+
+        Useful for auditing whether any incoming edge was dropped because
+        multiple edges fell into the same direction bucket.
+        """
+        mapping = self.map_intersection()
+
+        edge_vectors = {
+            edge_id: [float(vec[0]), float(vec[1])]
+            for edge_id, vec in self._edge_vectors.items()
+        }
+
+        direction_candidates = {
+            direction: [
+                {
+                    "edge": edge_id,
+                    "angle": float(angle)
+                }
+                for edge_id, angle in candidates
+            ]
+            for direction, candidates in self._direction_candidates.items()
+        }
+
+        return {
+            "incoming_edges": self._get_incoming_edges(),
+            "edge_angles": {k: float(v) for k, v in self._edge_angles.items()},
+            "edge_vectors": edge_vectors,
+            "edge_to_direction": self._edge_to_direction,
+            "direction_candidates": direction_candidates,
+            "selected_direction_map": mapping,
+        }
 
     def get_lanes_by_direction(self) -> Dict[str, List[str]]:
         """Get all lanes grouped by their cardinal direction.

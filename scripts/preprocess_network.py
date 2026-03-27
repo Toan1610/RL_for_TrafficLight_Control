@@ -252,7 +252,9 @@ def preprocess_network(
     output_file: str,
     config: Dict[str, Any],
     selected_ts_ids: Optional[List[str]] = None,
-    detector_file: Optional[str] = None
+    detector_file: Optional[str] = None,
+    gpi_debug_export: bool = False,
+    merge_collision_lanes: bool = True,
 ) -> Dict[str, Any]:
     """Preprocess a SUMO network and generate configuration.
     
@@ -327,12 +329,32 @@ def preprocess_network(
               f"S={direction_map['S']}, W={direction_map['W']}")
         
         # Get lanes by direction
+        # If multiple incoming edges map to the same direction bucket,
+        # optionally merge all candidate edges so lane/detector data is not dropped.
+        direction_candidates = gpi.get_direction_candidates()
+        edges_by_direction = {d: [] for d in ['N', 'E', 'S', 'W']}
         lanes_by_direction = {}
-        for direction, edge_id in direction_map.items():
-            if edge_id is not None:
-                lanes_by_direction[direction] = data_provider.get_edge_lanes(edge_id)
-            else:
-                lanes_by_direction[direction] = []
+        for direction in ['N', 'E', 'S', 'W']:
+            selected_edge = direction_map.get(direction)
+            candidate_edges = [edge for edge, _ in direction_candidates.get(direction, [])]
+
+            edge_order = []
+            if selected_edge is not None:
+                edge_order.append(selected_edge)
+
+            if merge_collision_lanes:
+                for edge_id in candidate_edges:
+                    if edge_id not in edge_order:
+                        edge_order.append(edge_id)
+
+            edges_by_direction[direction] = edge_order
+
+            merged_lanes = []
+            for edge_id in edge_order:
+                merged_lanes.extend(data_provider.get_edge_lanes(edge_id))
+
+            # Preserve order while removing duplicates.
+            lanes_by_direction[direction] = list(dict.fromkeys(merged_lanes))
         
         # Count lanes per direction
         total_lanes = sum(len(lanes) for lanes in lanes_by_direction.values())
@@ -391,6 +413,7 @@ def preprocess_network(
         # Store intersection config
         result["intersections"][tls_id] = {
             "direction_map": direction_map,
+            "edges_by_direction": edges_by_direction,
             "lanes_by_direction": lanes_by_direction,
             "detectors_by_direction": detectors_by_direction,
             "detectors_e1": all_e1_detectors,
@@ -418,6 +441,9 @@ def preprocess_network(
                 "standard_to_actual": frap.standard_to_actual
             }
         }
+
+        if gpi_debug_export:
+            result["intersections"][tls_id]["gpi_debug"] = gpi.get_debug_info()
     
     # Build adjacency matrix
     print(f"\n{'─'*40}")
@@ -502,6 +528,16 @@ def main():
         default=None,
         help="Path to detector.add.xml file (default: auto-detect in network directory)"
     )
+    parser.add_argument(
+        "--gpi-debug",
+        action="store_true",
+        help="Export detailed GPI debug info (direction candidates and selected edges)"
+    )
+    parser.add_argument(
+        "--no-merge-collision-lanes",
+        action="store_true",
+        help="Do not merge lanes from same-direction GPI candidates (legacy behavior)"
+    )
     
     args = parser.parse_args()
     
@@ -552,12 +588,20 @@ def main():
         output_file = network_dir / "intersection_config.json"
     
     # Run preprocessing
+    gpi_cfg = preprocessing_config.get("gpi", {}) if isinstance(preprocessing_config, dict) else {}
+    gpi_debug_export = bool(args.gpi_debug or gpi_cfg.get("debug_export", False))
+    merge_collision_lanes = bool(gpi_cfg.get("merge_collision_lanes", True))
+    if args.no_merge_collision_lanes:
+        merge_collision_lanes = False
+
     preprocess_network(
         net_file=str(net_file),
         output_file=str(output_file),
         config=preprocessing_config,
         selected_ts_ids=args.ts_ids,
-        detector_file=detector_file
+        detector_file=detector_file,
+        gpi_debug_export=gpi_debug_export,
+        merge_collision_lanes=merge_collision_lanes,
     )
 
 
