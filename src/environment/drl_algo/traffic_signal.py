@@ -1007,7 +1007,12 @@ class TrafficSignal:
         If outgoing lanes are congested, the agent should avoid giving green
         to directions flowing into those lanes.
         
-        Range: [-3, 0] (0 = perfectly balanced, -3 = severe imbalance)
+        Scale: same raw scale as cycle-diff-waiting-time.
+        - 0.0: perfectly balanced
+        - approximately -max_waiting_change: severe imbalance
+
+        This makes it directly comparable to cycle-diff-waiting-time when
+        combining rewards in a weighted sum.
         """
         in_lanes = self.lanes  # Incoming lanes (controlled lanes)
         out_lanes = self.data_provider.get_outgoing_lanes(self.id)
@@ -1017,13 +1022,19 @@ class TrafficSignal:
         
         pressure = abs(in_vehicles - out_vehicles)
         
-        # Normalize by max_veh to get [0, 1] range
+        # Convert pressure to a normalized ratio in [0, 1]
         if self.max_veh > 0:
-            normalized = min(1.0, pressure / self.max_veh)
+            pressure_ratio = min(1.0, pressure / self.max_veh)
         else:
-            normalized = 0.0
-        
-        return self._clip_reward(-normalized * 3.0, low=-3.0, high=0.0)
+            pressure_ratio = 0.0
+
+        # Match cycle-diff-waiting-time raw scale using the same reference
+        # magnitude used by normalized waiting rewards.
+        if self.max_veh > 0 and self.sampling_interval_s > 0:
+            max_waiting_change = self.max_veh * self.sampling_interval_s
+            return float(-pressure_ratio * max_waiting_change)
+
+        return 0.0
 
     def _hybrid_waiting_pressure_reward(self):
         """Hybrid reward: cycle-diff-waiting-time + PressLight pressure penalty.

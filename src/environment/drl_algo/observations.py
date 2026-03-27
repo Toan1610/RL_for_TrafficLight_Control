@@ -473,8 +473,12 @@ class NeighborTemporalObservationFunction(ObservationFunction):
                 - neighbor_mask: Box [K]
                 - action_mask: Box [8] for valid phases (FRAP)
         """
-        # 48 lane features + 8 green-time features = 56
-        feature_dim = 4 * len(self.ts.detectors_e2) + 8
+        # Keep Local-GNN feature dimension fixed across all intersections.
+        # Observation values are constructed with TARGET_NUM_LANES (12) lane groups
+        # + 8 green-time features, so the declared space must match exactly.
+        # Using detector-count-dependent dims causes RLlib preprocessor shape errors
+        # on heterogeneous networks (e.g., Zurich).
+        feature_dim = 4 * TARGET_NUM_LANES + NUM_GREEN_TIME_FEATURES
         T = self.window_size
         K = self.max_neighbors
         

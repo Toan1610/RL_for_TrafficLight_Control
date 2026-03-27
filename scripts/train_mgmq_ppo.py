@@ -268,6 +268,7 @@ def train_mgmq_ppo(
     preprocessing_config: str = None,  # From YAML config
     num_iterations: int = 200,
     num_workers: int = 2,
+    num_envs_per_worker: int = 1,
     checkpoint_interval: int = 5,
     reward_threshold: float = None,
     experiment_name: str = None,
@@ -471,6 +472,13 @@ def train_mgmq_ppo(
         ts_ids = get_network_ts_ids(network_name)
         num_agents = len(ts_ids)
         print(f"✓ Traffic signals: {num_agents} ({', '.join(ts_ids[:4])}{'...' if len(ts_ids) > 4 else ''})\n")
+
+        # For multi-intersection networks under the current RLlib integration,
+        # Local-GNN observation is more stable and matches the deployed pipeline.
+        if num_agents > 1 and not use_local_gnn:
+            print("⚠ Multi-intersection network detected.")
+            print("  Enabling Local GNN for stable neighbor-aware training on countdown control.")
+            use_local_gnn = True
         
         # Phase standardizer: maps model action to actual signal phases
         print(f"✓ Phase Standardizer: {'ENABLED' if use_phase_standardizer else 'DISABLED'}")
@@ -554,6 +562,7 @@ def train_mgmq_ppo(
             env_config=env_config,
             mgmq_config=mgmq_config,
             num_workers=num_workers,
+            num_envs_per_worker=num_envs_per_worker,
             learning_rate=learning_rate,
             gamma=gamma,
             lambda_=lambda_,
@@ -668,23 +677,39 @@ def train_mgmq_ppo(
         print("       -> Joint Embedding -> Policy/Value Networks -> Action\n")
         
         results = tuner.fit()
-        
-        # Get best results
-        best_checkpoint = results.get_best_result(
-            metric="env_runners/episode_reward_mean", 
-            mode="max"
-        ).checkpoint
-        best_result = results.get_best_result(
-            metric="env_runners/episode_reward_mean", 
-            mode="max"
-        )
+
+        # Determine whether training actually succeeded.
+        # Tune can return with errored trials; avoid marking those runs as completed.
+        errors = []
+        if hasattr(results, "errors") and results.errors:
+            errors = list(results.errors)
+
+        best_result = None
+        best_checkpoint = None
+        best_reward = 0.0
+        try:
+            best_result = results.get_best_result(
+                metric="env_runners/episode_reward_mean",
+                mode="max"
+            )
+            if best_result is not None:
+                best_checkpoint = best_result.checkpoint
+                best_reward = float(best_result.metrics.get("env_runners", {}).get("episode_reward_mean", 0.0))
+        except Exception as e:
+            print(f"⚠ Could not extract best result from Tune output: {e}")
+            best_result = None
+            best_checkpoint = None
+            best_reward = 0.0
+
+        training_succeeded = best_result is not None and len(errors) == 0
         
         print("\n" + "="*80)
-        print("MGMQ-PPO TRAINING COMPLETED")
+        print("MGMQ-PPO TRAINING COMPLETED" if training_succeeded else "MGMQ-PPO TRAINING FINISHED WITH ERRORS")
         print("="*80)
         print(f"Best Checkpoint: {best_checkpoint}")
-        best_reward = best_result.metrics.get("env_runners", {}).get("episode_reward_mean", 0)
         print(f"Best Episode Reward Mean: {best_reward:.2f}")
+        if errors:
+            print(f"Errored trials: {len(errors)}")
         print("="*80 + "\n")
         
         # Update configuration with training results
@@ -692,10 +717,11 @@ def train_mgmq_ppo(
         # Load existing config and update with results
         existing_config = initial_config.copy()
         existing_config.update({
-            "training_status": "completed",
+            "training_status": "completed" if training_succeeded else "failed",
             "completed_at": datetime.now().isoformat(),
-            "best_checkpoint": str(best_checkpoint),
+            "best_checkpoint": str(best_checkpoint) if best_checkpoint is not None else None,
             "best_reward": float(best_reward),
+            "error_count": len(errors),
         })
         with open(config_file, "w") as f:
             json.dump(existing_config, f, indent=2)
@@ -830,6 +856,7 @@ if __name__ == "__main__":
         preprocessing_config=network_cfg["intersection_config"],
         num_iterations=args.iterations if args.iterations is not None else training_cfg["num_iterations"],
         num_workers=args.workers if args.workers is not None else training_cfg["num_workers"],
+        num_envs_per_worker=training_cfg.get("num_envs_per_worker", 1),
         checkpoint_interval=args.checkpoint_interval if args.checkpoint_interval is not None else training_cfg["checkpoint_interval"],
         reward_threshold=args.reward_threshold,
         experiment_name=args.experiment_name,
