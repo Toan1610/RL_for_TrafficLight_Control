@@ -577,6 +577,7 @@ def evaluate_baseline(
         "--lateral-resolution 0.5 "
         "--ignore-route-errors "
         "--tls.actuated.jam-threshold 30 "
+        "--no-internal-links true "
         "--device.rerouting.adaptation-steps 18 "
         "--device.rerouting.adaptation-interval 10"
     )

@@ -1,0 +1,206 @@
+{
+  "network": "zurich",
+  "controller": "fixed",
+  "num_episodes": 1,
+  "eval_seeds": [
+    42
+  ],
+  "mean_reward": 1315.3181363449912,
+  "std_reward": 0.0,
+  "min_reward": 1315.3181363449912,
+  "max_reward": 1315.3181363449912,
+  "mean_raw_reward": 1315.3181363449912,
+  "std_raw_reward": 0.0,
+  "min_raw_reward": 1315.3181363449912,
+  "max_raw_reward": 1315.3181363449912,
+  "mean_length": 40.0,
+  "mean_completed_cycles": 1160.0,
+  "episode_rewards": [
+    1315.3181363449912
+  ],
+  "episode_raw_rewards": [
+    1315.3181363449912
+  ],
+  "episode_lengths": [
+    40
+  ],
+  "episode_completed_cycles": [
+    1160
+  ],
+  "per_agent_stats": {
+    "J1": {
+      "mean_reward": 56.62945932149887,
+      "std_reward": 0.0,
+      "mean_raw_reward": 56.62945932149887,
+      "std_raw_reward": 0.0
+    },
+    "J11": {
+      "mean_reward": 33.4435268342495,
+      "std_reward": 0.0,
+      "mean_raw_reward": 33.4435268342495,
+      "std_raw_reward": 0.0
+    },
+    "J12": {
+      "mean_reward": 45.62633486906998,
+      "std_reward": 0.0,
+      "mean_raw_reward": 45.62633486906998,
+      "std_raw_reward": 0.0
+    },
+    "J18": {
+      "mean_reward": 43.898335337638855,
+      "std_reward": 0.0,
+      "mean_raw_reward": 43.898335337638855,
+      "std_raw_reward": 0.0
+    },
+    "J2": {
+      "mean_reward": 44.210671454668045,
+      "std_reward": 0.0,
+      "mean_raw_reward": 44.210671454668045,
+      "std_raw_reward": 0.0
+    },
+    "J29": {
+      "mean_reward": 27.91707356274128,
+      "std_reward": 0.0,
+      "mean_raw_reward": 27.91707356274128,
+      "std_raw_reward": 0.0
+    },
+    "J4": {
+      "mean_reward": 44.80584318974434,
+      "std_reward": 0.0,
+      "mean_raw_reward": 44.80584318974434,
+      "std_raw_reward": 0.0
+    },
+    "cluster10206979633_11813833529_30148022_30825863": {
+      "mean_reward": 50.171275292057544,
+      "std_reward": 0.0,
+      "mean_raw_reward": 50.171275292057544,
+      "std_raw_reward": 0.0
+    },
+    "cluster10827082788_2567854590_27256989_2957061242": {
+      "mean_reward": 48.876517467200756,
+      "std_reward": 0.0,
+      "mean_raw_reward": 48.876517467200756,
+      "std_raw_reward": 0.0
+    },
+    "cluster10827082789_28582171_2957061238_2957062053": {
+      "mean_reward": 40.503675032407045,
+      "std_reward": 0.0,
+      "mean_raw_reward": 40.503675032407045,
+      "std_raw_reward": 0.0
+    },
+    "cluster11583966683_6165393385_843205119": {
+      "mean_reward": 45.54394216090441,
+      "std_reward": 0.0,
+      "mean_raw_reward": 45.54394216090441,
+      "std_raw_reward": 0.0
+    },
+    "cluster12453550285_cluster12453550280_292279061_7809714885": {
+      "mean_reward": 47.65195170044899,
+      "std_reward": 0.0,
+      "mean_raw_reward": 47.65195170044899,
+      "std_raw_reward": 0.0
+    },
+    "cluster12625073140_12625073150_2884057670_2923898716_#1more": {
+      "mean_reward": 44.24861592426896,
+      "std_reward": 0.0,
+      "mean_raw_reward": 44.24861592426896,
+      "std_raw_reward": 0.0
+    },
+    "cluster12788209370_27256997_2884057642_J1": {
+      "mean_reward": 44.08772196620703,
+      "std_reward": 0.0,
+      "mean_raw_reward": 44.08772196620703,
+      "std_raw_reward": 0.0
+    },
+    "cluster12867045509_1388689556_5116225741_5116225760_#3more": {
+      "mean_reward": 53.97418715432286,
+      "std_reward": 0.0,
+      "mean_raw_reward": 53.97418715432286,
+      "std_raw_reward": 0.0
+    },
+    "cluster1584034520_1584034532_1584034534_1584034537": {
+      "mean_reward": 42.00411581993103,
+      "std_reward": 0.0,
+      "mean_raw_reward": 42.00411581993103,
+      "std_raw_reward": 0.0
+    },
+    "cluster2172694601_2884057371_2884057377_3964600251_#2more": {
+      "mean_reward": 31.594641853123903,
+      "std_reward": 0.0,
+      "mean_raw_reward": 31.594641853123903,
+      "std_raw_reward": 0.0
+    },
+    "cluster2172694607_2261078657_2884057365_3955958142_#1more": {
+      "mean_reward": 45.739313535392284,
+      "std_reward": 0.0,
+      "mean_raw_reward": 45.739313535392284,
+      "std_raw_reward": 0.0
+    },
+    "cluster2261078667_2275742542_2884057379_4333509527": {
+      "mean_reward": 52.62241756916046,
+      "std_reward": 0.0,
+      "mean_raw_reward": 52.62241756916046,
+      "std_raw_reward": 0.0
+    },
+    "cluster2261078859_3946827990_6165393389_6165393416": {
+      "mean_reward": 36.54243342936388,
+      "std_reward": 0.0,
+      "mean_raw_reward": 36.54243342936388,
+      "std_raw_reward": 0.0
+    },
+    "cluster2463962663_2964071731_30825881_5682255964": {
+      "mean_reward": 54.4056194499135,
+      "std_reward": 0.0,
+      "mean_raw_reward": 54.4056194499135,
+      "std_raw_reward": 0.0
+    },
+    "cluster28581626_6165393392_6165393419_J11": {
+      "mean_reward": 32.513898162171245,
+      "std_reward": 0.0,
+      "mean_raw_reward": 32.513898162171245,
+      "std_raw_reward": 0.0
+    },
+    "cluster2884057633_2884057637_2884057639_633672243": {
+      "mean_reward": 50.31062280386686,
+      "std_reward": 0.0,
+      "mean_raw_reward": 50.31062280386686,
+      "std_raw_reward": 0.0
+    },
+    "cluster292272389_J4_J5_J6": {
+      "mean_reward": 48.36968940496445,
+      "std_reward": 0.0,
+      "mean_raw_reward": 48.36968940496445,
+      "std_raw_reward": 0.0
+    },
+    "cluster297958412_5285897990_5285898010": {
+      "mean_reward": 51.99053883552551,
+      "std_reward": 0.0,
+      "mean_raw_reward": 51.99053883552551,
+      "std_raw_reward": 0.0
+    },
+    "cluster3944993721_3944993722_3944993723_3944993724": {
+      "mean_reward": 49.02803194522858,
+      "std_reward": 0.0,
+      "mean_raw_reward": 49.02803194522858,
+      "std_raw_reward": 0.0
+    },
+    "clusterJ14_cluster1923986931_28137432_3071329232_8856676981": {
+      "mean_reward": 55.834138825157424,
+      "std_reward": 0.0,
+      "mean_raw_reward": 55.834138825157424,
+      "std_raw_reward": 0.0
+    },
+    "clusterJ16_clusterJ11_J12_J13_J9": {
+      "mean_reward": 51.1728013465181,
+      "std_reward": 0.0,
+      "mean_raw_reward": 51.1728013465181,
+      "std_raw_reward": 0.0
+    },
+    "clusterJ3_cluster1233603788_12799959199_12800019444_5730016977": {
+      "mean_reward": 41.60074209724553,
+      "std_reward": 0.0,
+      "mean_raw_reward": 41.60074209724553,
+      "std_raw_reward": 0.0
+    }
+  }
+}
