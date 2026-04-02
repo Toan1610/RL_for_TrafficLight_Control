@@ -1037,26 +1037,27 @@ class TrafficSignal:
         return 0.0
 
     def _hybrid_waiting_pressure_reward(self):
-        """Hybrid reward: cycle-diff-waiting-time + PressLight pressure penalty.
-        
-        Combines:
-        1. Waiting time reduction (main signal, from paper)
-        2. PressLight pressure penalty (prevents directional imbalance)
-        
+        """Hybrid reward: E2 waiting-time delta + E2 pressure penalty.
+
+        Combines (both from E2 detectors):
+        1. Waiting time reduction from detector-based cycle aggregation
+        2. Pressure penalty from detector-based pressure estimate
+
         Formula:
-            reward = (W_before - W_after) + alpha * (-|veh_in - veh_out| / max_veh)
-        
-        where alpha controls pressure penalty strength.
-        
-        This forces the agent to both reduce waiting time AND balance flow
-        across all directions, avoiding the situation where one direction
-        is empty while another is gridlocked.
-        
+            reward = (W_before - W_after) - alpha * |pressure_e2|
+
         Returns:
             float: Combined reward (not clipped to fixed range)
         """
-        # Component 1: Waiting time reduction (same as cycle-diff-waiting-time)
-        ts_wait = self.get_aggregated_waiting_time()
+        if not self.detectors_e2:
+            return 0.0
+
+        # Component 1: detector-based waiting time reduction
+        waiting_history = self.reward_metrics_history.get("waiting_time", [])
+        if waiting_history:
+            ts_wait = self._safe_mean(waiting_history, fallback=0.0)
+        else:
+            ts_wait = self._get_waiting_time_from_detectors()
 
         # Warm-start baseline: avoid first-cycle bias from initial 0.0 reference.
         if not self._has_waiting_baseline:
@@ -1067,18 +1068,8 @@ class TrafficSignal:
         waiting_diff = self.last_ts_waiting_time - ts_wait
         self.last_ts_waiting_time = ts_wait
         
-        # Component 2: PressLight pressure penalty
-        in_lanes = self.lanes
-        out_lanes = self.data_provider.get_outgoing_lanes(self.id)
-        
-        in_vehicles = sum(self.data_provider.get_lane_vehicle_count(l) for l in in_lanes)
-        out_vehicles = sum(self.data_provider.get_lane_vehicle_count(l) for l in out_lanes)
-        
-        pressure = abs(in_vehicles - out_vehicles)
-        if self.max_veh > 0:
-            pressure_norm = min(1.0, pressure / self.max_veh)
-        else:
-            pressure_norm = 0.0
+        # Component 2: detector-based pressure penalty
+        pressure_norm = abs(self.get_pressure_from_detectors())
 
         alpha = 0.3
         pressure_penalty = -alpha * pressure_norm
@@ -1102,7 +1093,16 @@ class TrafficSignal:
         return self._clip_reward((avg_speed * 6.0) - 3.0)
 
     def _queue_reward(self):
-        """Computes queue-based reward. Range: [-3, 0]."""
+        """Computes E2-based queue reward. Range: [-3, 0].
+
+        Data source:
+        - Queue is aggregated from E2 detector halting counts via
+          get_aggregated_queued() -> reward_metrics_history["total_queued"],
+          with fallback to get_total_queued() from E2 detectors.
+        """
+        if not self.detectors_e2:
+            return 0.0
+
         total_queued = self.get_aggregated_queued()
         if self.max_veh == 0:
             return 0.0
@@ -1275,6 +1275,29 @@ class TrafficSignal:
         
         # Clip to max 3.0 (100% clearance is excellent already)
         return max(0.0, min(3.0, reward))
+
+    def _throughput_reward(self):
+        """Computes E2-based throughput reward normalized by detector capacity. Range: [0.0, 3.0].
+
+        Data source:
+        - departed_vehicles_this_cycle is computed from E2 detector vehicle IDs
+          in update_cycle_vehicle_tracking() / _get_current_vehicle_ids().
+        - max_veh is computed from E2 detector geometry in _compute_max_veh().
+
+        Logic:
+        - If no E2 detectors are configured, return 0.0 (invalid throughput signal).
+        - Normalize departed vehicles by detector-based capacity.
+        - Scale to [0, 3] to match the reward convention used in this project.
+        """
+        if not self.detectors_e2:
+            return 0.0
+
+        if self.max_veh <= 0:
+            return 0.0
+
+        departed = float(self.departed_vehicles_this_cycle)
+        ratio = max(0.0, min(1.0, departed / float(self.max_veh)))
+        return self._clip_reward(ratio * 3.0, low=0.0, high=3.0)
 
     def _teleport_penalty_reward(self):
         """Computes penalty for teleported vehicles. Range: [-3.0, 0.0].
@@ -1918,5 +1941,6 @@ class TrafficSignal:
         "hybrid-waiting-pressure": _hybrid_waiting_pressure_reward,
         "halt-veh-by-detectors": _halt_veh_reward_by_detectors,
         "diff-departed-veh": _diff_departed_veh_reward,
+        "throughput": _throughput_reward,
         "teleport-penalty": _teleport_penalty_reward,
     }

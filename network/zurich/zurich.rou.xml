@@ -22,7 +22,7 @@
            apparentDecel="3.5"
            emergencyDecel="6.0"
            sigma="0.8"
-           tau="0.8"
+           tau="1.0"
            minGap="1.0"
            speedFactor="normc(1.1,0.2,0.8,1.4)"
            color="yellow"

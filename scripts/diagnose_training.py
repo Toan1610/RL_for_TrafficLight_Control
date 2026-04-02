@@ -339,7 +339,7 @@ def run_diagnostic_training(iterations: int = 10, config_path: str = None):
         "use_neighbor_obs": use_local_gnn,
         "max_neighbors": mgmq_cfg.get("max_neighbors", 4),
         "normalize_reward": False,
-        "normalizer_state_file": str(diag_output / "normalizer_state.json"),
+        "normalizer_state_file": None,  # Always reset for new runs
     }
     
     mgmq_config = {

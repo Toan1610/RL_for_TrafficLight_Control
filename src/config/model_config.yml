@@ -6,20 +6,20 @@
 # ============================================
 network:
   # Name of the traffic network (used as folder name under network/)
-  name: PhuQuoc
+  name: zurich
 
   # Base path for network files (relative to project root)
   # If not specified, defaults to: network/{network_name}/
   base_path: null
 
   # Network files (relative to base_path if base_path is set, or absolute paths)
-  net_file: phuquoc.net.xml
+  net_file: zurich.net.xml
 
   # Route files - can be a single file or comma-separated list
   # Order matters: type definitions should come before trip definitions
   route_files:
-    - phuquoc.rou.xml       # Vehicle type definitions (vTypes only)
-    - phuquoc-demo.rou.xml  # Trips (3052 vehicles, depart up to 3597s)
+    - zurich.rou.xml       # Vehicle type definitions (vTypes only)
+    - zurich-demo.rou.xml  # Trips (3052 vehicles, depart up to 3597s)
 
   # Detector configuration file (for E2 detector-based rewards)
   detector_file: detector.add.xml
@@ -64,7 +64,7 @@ mgmq:
 
   # Local GNN settings
   local_gnn:
-    enabled: true # Use LocalMGMQTorchModel
+    enabled: false # Use LocalMGMQTorchModel
     max_neighbors: 4 # Maximum neighbors (K) for local GNN
     obs_dim: 56 # 48 lane features (4*12) + 8 green-time ratio features
 
@@ -73,13 +73,13 @@ mgmq:
 # ============================================
 ppo:
   # Section 9.4: Standard lr, no need to separate Actor/Critic
-  learning_rate: 0.00015 # 3e-4 standard PPO learning rate
+  learning_rate: 0.0003 # 3e-4 standard PPO learning rate
   # Slightly lower gamma to improve credit assignment speed in long-cycle control.
   gamma: 0.995 # Discount factor
   lambda_: 0.95 # GAE lambda
   # Reduce exploration noise to help policy exploit stable countdown adjustments sooner.
   entropy_coeff: 0.01 # Entropy coefficient (increased from 0.003 to prevent collapse)
-  clip_param: 0.15 # Standard PPO clip parameter
+  clip_param: 0.2 # Standard PPO clip parameter
   # KL constraint prevents policy jump with large updates
   kl_coeff: 0.2 # Initial KL penalty coefficient (do NOT set to 0)
   kl_target: 0.03 # KL target - relaxed from 0.01 to prevent kl_coeff explosion (25x)
@@ -87,14 +87,14 @@ ppo:
   fixed_kl_coeff: null # Set 0.02-0.05 to disable adaptive KL and keep penalty constant
   # vf_clip_param: must be >= max episode return. With hybrid-waiting-pressure,
   # episode returns can reach ~100+. Too small (10.0) prevents VF from learning.
-  vf_clip_param: 100.0 # Value function clip (set >= max expected episode return)
+  vf_clip_param: 10.0 # Value function clip (set >= max expected episode return)
   # Keep Critic learning strong to maintain stable value targets.
   vf_loss_coeff: 1.0 # Value loss coefficient
   # With num_seconds=3600, cycle_time=90: ~40 steps/episode, 16 agents
   # 1 episode = 40*16 = 640 agent_steps. 4 episodes = 2560
   # Heavy traffic (36k veh) is slow to simulate → keep batch small to avoid timeout
-  train_batch_size: 1760 # 4 episodes/batch: 40steps * 16agents = 640/ep
-  minibatch_size: 440 # SGD minibatch size
+  train_batch_size: 4640 # 4 episodes/batch: 40steps * 16agents = 640/ep
+  minibatch_size: 1160 # SGD minibatch size
   num_sgd_iter: 6 # Number of SGD epochs per training batch
   grad_clip: 10.0 # Gradient clipping (standard for GNN models)
 
@@ -126,24 +126,27 @@ reward:
   #   - queue                    : Queue length penalty [-3, 0]
   #   - halt-veh-by-detectors    : Halting vehicle penalty [-3, 0]
   #   - diff-departed-veh        : Throughput (departed vehicles) [0, 3]
+  #   - throughput               : Throughput normalized by detector capacity [0, 3]
   #   - teleport-penalty         : Teleportation penalty [-3, 0]
   #
   # Can use a single function or a list with weights:
-  #   functions: [diff-waiting-time, presslight-pressure, diff-departed-veh, teleport-penalty]
+  #   functions: [diff-waiting-time, presslight-pressure, throughput, teleport-penalty]
   #   weights: [1.0, 0.5, 0.5, 0.6]
   #
   # Or use the hybrid reward (all-in-one):
   #   functions: [hybrid-waiting-pressure]
   functions:
     #- diff-departed-veh
+    - throughput
+    - queue
     #- halt-veh-by-detectors
     #- teleport-penalty
     #- cycle-diff-waiting-time-normalized
     #- cycle-diff-waiting-time
     #- presslight-pressure
-    - hybrid-waiting-pressure
+    #- hybrid-waiting-pressure
     #- pressure
-  weights: auto # Default stable blend for Zurich high-demand profile
+  weights: [1.0, 0.4] # Default stable blend for Zurich high-demand profile
  
 # ============================================
 # Action Configuration
@@ -173,5 +176,5 @@ environment:
   use_phase_standardizer: true # Map 4-value action to signal phases
   # Section 9.1: Enable reward normalization (ép Value loss về O(1))
   normalize_reward: true # RLlib normalize_rewards = True
-  clip_rewards: 5.0 # Clip normalized rewards to [-5, 5] to prevent outliers
+  clip_rewards: 5.0 # Clip normalized rewards to [-10, 10] to prevent outliers
   # Section 9.1: Use frame stacking for temporal context (window size = history

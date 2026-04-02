@@ -21,7 +21,7 @@
            apparentDecel="3.5"
            emergencyDecel="6.0"
            sigma="0"
-           tau="0.8"
+           tau="1.0"
            minGap="1.0"
            speedFactor="1.1"
            color="yellow"

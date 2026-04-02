@@ -488,6 +488,7 @@ def train_mgmq_ppo(
             "--step-length 1 "
             "--lateral-resolution 0.5 "
             "--ignore-route-errors "
+            "--no-internal-links true "
             "--tls.actuated.jam-threshold 30 "
             "--device.rerouting.adaptation-steps 18 "
             "--device.rerouting.adaptation-interval 10"
@@ -523,9 +524,11 @@ def train_mgmq_ppo(
             # Them phan chuan hoa reward o file env
             "normalize_reward": normalize_reward,    # Enable running mean/std normalization
             "clip_rewards": clip_rewards,             # Clip normalized rewards to [-clip, +clip]
-            # Path to normalizer state file (for resume training)
-            # Environment will load state from this file if it exists
-            "normalizer_state_file": str(output_dir / experiment_name / "normalizer_state.json"),
+            # Only restore normalizer when explicitly resuming training.
+            # Fresh runs should start with a fresh normalizer state.
+            "normalizer_state_file": (
+                str(output_dir / experiment_name / "normalizer_state.json") if resume_path else None
+            ),
             # Action mode: "discrete_adjustment" (MultiDiscrete) or "ratio" (Box)
             "action_mode": action_mode,
         }
@@ -689,12 +692,12 @@ def train_mgmq_ppo(
         best_reward = 0.0
         try:
             best_result = results.get_best_result(
-                metric="env_runners/episode_reward_mean",
+                metric="env_runners/custom_metrics/raw_episode_reward_mean",
                 mode="max"
             )
             if best_result is not None:
                 best_checkpoint = best_result.checkpoint
-                best_reward = float(best_result.metrics.get("env_runners", {}).get("episode_reward_mean", 0.0))
+                best_reward = float(best_result.metrics.get("env_runners", {}).get("custom_metrics", {}).get("raw_episode_reward_mean", 0.0))
         except Exception as e:
             print(f"⚠ Could not extract best result from Tune output: {e}")
             best_result = None
@@ -707,7 +710,7 @@ def train_mgmq_ppo(
         print("MGMQ-PPO TRAINING COMPLETED" if training_succeeded else "MGMQ-PPO TRAINING FINISHED WITH ERRORS")
         print("="*80)
         print(f"Best Checkpoint: {best_checkpoint}")
-        print(f"Best Episode Reward Mean: {best_reward:.2f}")
+        print(f"Best Raw Episode Reward Mean: {best_reward:.2f}")
         if errors:
             print(f"Errored trials: {len(errors)}")
         print("="*80 + "\n")
