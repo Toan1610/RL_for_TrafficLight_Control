@@ -19,6 +19,7 @@ Fix: Normalizing advantages per minibatch (mean=0, std=1) ensures:
 """
 
 import logging
+from pathlib import Path
 from typing import Dict, List, Type, Union
 
 import numpy as np
@@ -383,3 +384,24 @@ class MGMQPPO(PPO):
             return MGMQPPOTorchPolicy
         else:
             raise ValueError("Only torch framework is supported for MGMQ-PPO")
+
+    @override(PPO)
+    def setup(self, config):
+        """Set up algorithm and optionally warm-start from a checkpoint."""
+        super().setup(config)
+
+        resume_checkpoint = self.config.get("resume_from_checkpoint")
+        if not resume_checkpoint:
+            return
+
+        ckpt_path = Path(str(resume_checkpoint))
+        if not ckpt_path.exists():
+            raise FileNotFoundError(
+                f"resume_from_checkpoint path does not exist: {ckpt_path}"
+            )
+
+        # This path is used for "resume with overrides" where hyperparameters
+        # come from the new config, but weights/states are initialized from
+        # a previous checkpoint.
+        logger.warning("[MGMQPPO] Warm-starting from checkpoint: %s", ckpt_path)
+        self.restore(str(ckpt_path))

@@ -134,6 +134,29 @@ class MGMQStopper(Stopper):
         return False
 
 
+def find_latest_checkpoint_dir(experiment_dir: Path) -> Path:
+    """Return the newest RLlib checkpoint directory under an experiment path."""
+    if not experiment_dir.exists():
+        raise FileNotFoundError(f"Experiment path not found: {experiment_dir}")
+
+    checkpoint_dirs = [
+        p for p in experiment_dir.rglob("checkpoint_*")
+        if p.is_dir() and (p / "algorithm_state.pkl").exists()
+    ]
+
+    if not checkpoint_dirs:
+        raise FileNotFoundError(
+            f"No checkpoint_* directories with algorithm_state.pkl found under: {experiment_dir}"
+        )
+
+    def _checkpoint_step(path: Path) -> int:
+        suffix = path.name.split("_")[-1]
+        return int(suffix) if suffix.isdigit() else -1
+
+    checkpoint_dirs.sort(key=lambda p: (_checkpoint_step(p), p.stat().st_mtime))
+    return checkpoint_dirs[-1]
+
+
 
 def create_mgmq_ppo_config(
     env_config: dict,
@@ -248,6 +271,8 @@ def create_mgmq_ppo_config(
     # - fixed_kl_coeff: optional constant KL penalty
     config.min_kl_coeff = min_kl_coeff
     config.fixed_kl_coeff = fixed_kl_coeff
+    # Optional warm-start checkpoint for "resume with overrides" flow.
+    config.resume_from_checkpoint = None
 
     # CRITICAL FIX: Disable normalize_actions
     # For MaskedSoftmax: outputs valid simplex actions in [0,1]; unsquash would distort them
@@ -270,6 +295,7 @@ def train_mgmq_ppo(
     num_workers: int = 2,
     num_envs_per_worker: int = 1,
     checkpoint_interval: int = 5,
+    checkpoint_num_to_keep: int = 5,
     reward_threshold: float = None,
     experiment_name: str = None,
     use_gui: bool = False,
@@ -392,6 +418,8 @@ def train_mgmq_ppo(
     print(f"Network: {network_name}")
     print(f"Iterations: {num_iterations}")
     print(f"Workers: {num_workers}")
+    print(f"Checkpoint interval: {checkpoint_interval}")
+    print(f"Checkpoint keep: {checkpoint_num_to_keep}")
     print(f"GPU: {use_gpu}")
     print(f"Seed: {seed}")
     print("-"*80)
@@ -606,30 +634,40 @@ def train_mgmq_ppo(
         
         # Resume training or create new Tuner
         if resume_path:
-            # Resume from previous experiment
+            # Resume from previous experiment's latest checkpoint, but launch
+            # a NEW trial so current YAML/CLI hyperparameters are applied.
             resume_path = Path(resume_path).resolve()
             if not resume_path.exists():
                 raise FileNotFoundError(f"Resume path not found: {resume_path}")
+
+            latest_checkpoint = find_latest_checkpoint_dir(resume_path)
+            ppo_param_space["resume_from_checkpoint"] = str(latest_checkpoint)
             
             print(f"\n{'='*80}")
             print("RESUMING TRAINING FROM PREVIOUS EXPERIMENT")
             print(f"{'='*80}")
             print(f"Resume path: {resume_path}")
+            print(f"Warm-start checkpoint: {latest_checkpoint}")
+            print("Config overrides from YAML/CLI will be applied to the new trial")
             print(f"New max iterations: {num_iterations}")
             print(f"{'='*80}\n")
             
-            # Use Tuner.restore() to resume from checkpoint
-            tuner = tune.Tuner.restore(
-                path=str(resume_path),
-                trainable="MGMQPPO",
-                resume_unfinished=True,  # Resume trials that haven't finished
-                resume_errored=True,  # Retry trials that errored
-                param_space=ppo_param_space,  # Allow parameter overrides
-                # Override stopper with new iteration count
-                restart_errored=False,  # Don't restart errored trials from scratch
+            tuner = tune.Tuner(
+                "MGMQPPO",
+                param_space=ppo_param_space,
+                run_config=tune.RunConfig(
+                    name=experiment_name,
+                    storage_path=str(storage_path),
+                    stop=stopper,
+                    checkpoint_config=tune.CheckpointConfig(
+                        checkpoint_frequency=checkpoint_interval,
+                        num_to_keep=checkpoint_num_to_keep,
+                        checkpoint_score_attribute="env_runners/episode_reward_mean",
+                        checkpoint_score_order="max",
+                    ),
+                    verbose=1,
+                ),
             )
-            # Note: stopper is reinitialized, so the iteration count starts fresh
-            # The model weights are restored from the last checkpoint
         else:
             # Create new Tuner for fresh training using MGMQ-PPO
             # (includes per-minibatch advantage normalization + clip_fraction tracking)
@@ -642,7 +680,7 @@ def train_mgmq_ppo(
                     stop=stopper,
                     checkpoint_config=tune.CheckpointConfig(  # Use tune.CheckpointConfig
                         checkpoint_frequency=checkpoint_interval,
-                        num_to_keep=5,
+                        num_to_keep=checkpoint_num_to_keep,
                         checkpoint_score_attribute="env_runners/episode_reward_mean",
                         checkpoint_score_order="max",
                     ),
@@ -749,7 +787,7 @@ if __name__ == "__main__":
     
     # Basic arguments
     parser.add_argument("--network", type=str, default=None,
-                        choices=["grid4x4", "4x4loop", "network_test", "zurich", "PhuQuoc", "test"],
+                        choices=["grid4x4", "4x4loop", "network_test", "zurich", "PhuQuoc", "test", "cologne3"],
                         help="Network name")
     parser.add_argument("--iterations", type=int, default=None,
                         help="Number of training iterations")
@@ -757,6 +795,8 @@ if __name__ == "__main__":
                         help="Number of parallel workers")
     parser.add_argument("--checkpoint-interval", type=int, default=None,
                         help="Checkpoint interval")
+    parser.add_argument("--checkpoint-num-to-keep", type=int, default=None,
+                        help="How many recent checkpoints to keep (default from config)")
     parser.add_argument("--reward-threshold", type=float, default=None,
                         help="Stop if reward exceeds threshold")
     parser.add_argument("--experiment-name", type=str, default=None,
@@ -861,6 +901,11 @@ if __name__ == "__main__":
         num_workers=args.workers if args.workers is not None else training_cfg["num_workers"],
         num_envs_per_worker=training_cfg.get("num_envs_per_worker", 1),
         checkpoint_interval=args.checkpoint_interval if args.checkpoint_interval is not None else training_cfg["checkpoint_interval"],
+        checkpoint_num_to_keep=(
+            args.checkpoint_num_to_keep
+            if args.checkpoint_num_to_keep is not None
+            else training_cfg.get("checkpoint_num_to_keep", 5)
+        ),
         reward_threshold=args.reward_threshold,
         experiment_name=args.experiment_name,
         use_gui=args.gui,

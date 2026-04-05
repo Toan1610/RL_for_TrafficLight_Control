@@ -16,7 +16,7 @@ import sys
 import json
 import argparse
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -65,6 +65,67 @@ register_masked_softmax_distribution()
 register_masked_multi_categorical()
 
 
+SYSTEM_METRIC_KEYS = (
+    "system_total_waiting_time",
+    "system_mean_speed",
+    "system_total_stopped",
+    "system_throughput",
+    "system_mean_pressure",
+)
+
+
+def _resolve_existing_files_csv(file_list: Optional[str], project_root: Path) -> List[str]:
+    """Resolve a comma-separated file list to absolute existing paths."""
+    if not file_list:
+        return []
+
+    resolved: List[str] = []
+    for raw_item in str(file_list).split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+
+        path = Path(item)
+        if not path.is_absolute():
+            candidate = project_root / path
+            if candidate.exists():
+                path = candidate
+
+        if not path.exists():
+            raise FileNotFoundError(f"Required file not found: {item}")
+
+        resolved.append(str(path.resolve()))
+
+    return resolved
+
+
+def _extract_system_metrics(info: Dict[str, Any], active_ts_ids: List[str]) -> Dict[str, float]:
+    """Extract system metrics from either top-level info or per-agent info dicts."""
+    if not isinstance(info, dict) or not info:
+        return {}
+
+    top_level_metrics = {k: info[k] for k in SYSTEM_METRIC_KEYS if k in info}
+    if top_level_metrics:
+        return top_level_metrics
+
+    # RLlib MultiAgent wrapper stores shared metrics inside each agent's info dict.
+    for ts_id in active_ts_ids:
+        ts_info = info.get(ts_id)
+        if isinstance(ts_info, dict):
+            metrics = {k: ts_info[k] for k in SYSTEM_METRIC_KEYS if k in ts_info}
+            if metrics:
+                return metrics
+
+    # Fallback for unknown agent ordering.
+    for value in info.values():
+        if isinstance(value, dict):
+            metrics = {k: value[k] for k in SYSTEM_METRIC_KEYS if k in value}
+            if metrics:
+                return metrics
+
+    return {}
+
+
 
 
 
@@ -85,6 +146,9 @@ def evaluate_mgmq(
     use_training_config: bool = True,
     config_path: Optional[str] = None,
     cycle_time_override: Optional[int] = None,
+    num_seconds_override: Optional[int] = None,
+    route_files_override: Optional[str] = None,
+    extra_additional_files: Optional[str] = None,
 ):
     """
     Evaluate a trained MGMQ-PPO model.
@@ -99,9 +163,14 @@ def evaluate_mgmq(
         seeds: List of eval seeds, one episode per seed. If None, auto-generated from num_episodes.
         use_training_config: Whether to load and use training configuration
         cycle_time_override: Optional cycle_time override for evaluation environment
+        num_seconds_override: Optional simulation duration override for evaluation
+        route_files_override: Optional comma-separated route file paths override
+        extra_additional_files: Optional comma-separated additional file paths
     """
     if num_episodes <= 0:
         raise ValueError("num_episodes must be > 0")
+    if num_seconds_override is not None and int(num_seconds_override) <= 0:
+        raise ValueError("num_seconds_override must be > 0")
     if seeds:
         seeds = list(seeds)
     else:
@@ -169,10 +238,24 @@ def evaluate_mgmq(
         
         # Use network config from YAML (or CLI override)
         net_file = network_cfg["net_file"]
-        route_file = network_cfg["route_file"]
+        if route_files_override:
+            route_parts = _resolve_existing_files_csv(route_files_override, project_root)
+            route_file = ",".join(route_parts)
+        else:
+            route_file = network_cfg["route_file"]
         preprocessing_config = network_cfg["intersection_config"]
         detector_file = network_cfg["detector_file"]
         network_name = network_cfg["network_name"]  # Update network_name from config
+
+        detector_parts: List[str] = []
+        if detector_file:
+            try:
+                detector_parts = _resolve_existing_files_csv(detector_file, project_root)
+            except FileNotFoundError:
+                print(f"⚠ Warning: detector file not found, skipping: {detector_file}")
+
+        extra_additional_parts = _resolve_existing_files_csv(extra_additional_files, project_root)
+        additional_files = list(dict.fromkeys(detector_parts + extra_additional_parts))
 
         # Validate network files
         if not Path(net_file).exists():
@@ -181,6 +264,8 @@ def evaluate_mgmq(
         print(f"✓ Network: {network_name}")
         print(f"✓ Network file: {net_file}")
         print(f"✓ Route file: {route_file}")
+        if additional_files:
+            print(f"✓ Additional files: {','.join(additional_files)}")
         
         if preprocessing_config and Path(preprocessing_config).exists():
             print(f"✓ Preprocessing config: {preprocessing_config}")
@@ -196,6 +281,8 @@ def evaluate_mgmq(
         if training_config and "env_config" in training_config:
             # Use stored env_config from training
             stored_env_config = training_config["env_config"]
+            train_num_seconds = int(stored_env_config.get("num_seconds", 8000))
+            config_num_seconds = int(yaml_env_cfg.get("num_seconds", train_num_seconds))
             
             # FORCE OVERRIDE PATHS from local environment to fix Cloud vs Local path issues
             # We use network paths from YAML config (already resolved above)
@@ -207,13 +294,14 @@ def evaluate_mgmq(
                 "--step-length 1 "
                 "--lateral-resolution 0.5 "
                 "--ignore-route-errors "
+                "--ignore-junction-blocker 1 "
                 "--tls.actuated.jam-threshold 30 "
                 "--no-internal-links true "
                 "--device.rerouting.adaptation-steps 18 "
                 "--device.rerouting.adaptation-interval 10"
             )
-            if detector_file and Path(detector_file).exists():
-                additional_sumo_cmd = f"-a {detector_file} {additional_sumo_cmd}"
+            if additional_files:
+                additional_sumo_cmd = f"-a {','.join(additional_files)} {additional_sumo_cmd}"
             
             env_config = {
                 "net_file": net_file,  # FROM YAML CONFIG
@@ -221,7 +309,8 @@ def evaluate_mgmq(
                 "use_gui": use_gui,  # Override with current setting
                 "virtual_display": None,  # Disable virtual display for local evaluation
                 "render_mode": "human" if render else None,
-                "num_seconds": int(stored_env_config.get("num_seconds", 8000)),
+                # Keep training config by default, but allow model_config.yml horizon to drive evaluation horizon.
+                "num_seconds": config_num_seconds,
                 "max_green": int(stored_env_config.get("max_green", 90)),
                 "min_green": int(stored_env_config.get("min_green", 5)),
                 "cycle_time": int(stored_env_config.get("cycle_time", stored_env_config.get("delta_time", 90))),
@@ -256,6 +345,11 @@ def evaluate_mgmq(
             print(f"  window_size: {env_config['window_size']}")
             print(f"  use_phase_standardizer: {env_config['use_phase_standardizer']}")
             print(f"  use_neighbor_obs: {env_config['use_neighbor_obs']}")
+            if config_num_seconds != train_num_seconds:
+                print(
+                    f"  num_seconds source: model_config.yml ({config_num_seconds}) "
+                    f"over checkpoint ({train_num_seconds})"
+                )
 
         else:
             # Build additional SUMO command with detector file
@@ -264,12 +358,13 @@ def evaluate_mgmq(
                 "--step-length 1 "
                 "--lateral-resolution 0.5 "
                 "--ignore-route-errors "
+                "--ignore-junction-blocker 1 "
                 "--tls.actuated.jam-threshold 30 "
                 "--device.rerouting.adaptation-steps 18 "
                 "--device.rerouting.adaptation-interval 10"
             )
-            if detector_file and Path(detector_file).exists():
-                additional_sumo_cmd = f"-a {detector_file} {additional_sumo_cmd}"
+            if additional_files:
+                additional_sumo_cmd = f"-a {','.join(additional_files)} {additional_sumo_cmd}"
             
             # Use default config from YAML
             env_config = {
@@ -307,6 +402,10 @@ def evaluate_mgmq(
         if cycle_time_override is not None:
             env_config["cycle_time"] = int(cycle_time_override)
             print(f"\n⚠ Overriding cycle_time for evaluation: {env_config['cycle_time']}")
+
+        if num_seconds_override is not None:
+            env_config["num_seconds"] = int(num_seconds_override)
+            print(f"⚠ Overriding num_seconds for evaluation: {env_config['num_seconds']}")
         
         print("")
         
@@ -420,6 +519,7 @@ def evaluate_mgmq(
             total_raw_reward = 0
             agent_rewards = {ts_id: 0 for ts_id in active_ts_ids}
             agent_raw_rewards = {ts_id: 0 for ts_id in active_ts_ids}
+            latest_system_metrics: Dict[str, float] = {}
             step_count = 0
             
             while not done.get("__all__", False):
@@ -478,6 +578,12 @@ def evaluate_mgmq(
                     total_raw_reward += raw_r
                     if agent_id in agent_raw_rewards:
                         agent_raw_rewards[agent_id] += raw_r
+
+                # Keep the latest available system metrics across the episode.
+                # Terminal step info can be empty in MultiAgent wrappers.
+                step_system_metrics = _extract_system_metrics(info, active_ts_ids)
+                if step_system_metrics:
+                    latest_system_metrics = step_system_metrics
                 
                 step_count += 1
                 
@@ -495,17 +601,18 @@ def evaluate_mgmq(
                 if ts_id in agent_raw_rewards:
                     per_agent_raw_rewards[ts_id].append(agent_raw_rewards[ts_id])
             
-            # Get system metrics from top-level info dict
-            if "system_total_waiting_time" in info:
-                episode_waiting_times.append(info["system_total_waiting_time"])
-            if "system_mean_speed" in info:
-                episode_avg_speeds.append(info["system_mean_speed"])
-            if "system_total_stopped" in info:
-                episode_total_halts.append(info["system_total_stopped"])
-            if "system_throughput" in info:
-                episode_throughputs.append(info["system_throughput"])
-            if "system_mean_pressure" in info:
-                episode_mean_pressures.append(info["system_mean_pressure"])
+            # System metrics can be at top-level or nested per-agent (RLlib wrapper).
+            system_metrics = latest_system_metrics
+            if "system_total_waiting_time" in system_metrics:
+                episode_waiting_times.append(system_metrics["system_total_waiting_time"])
+            if "system_mean_speed" in system_metrics:
+                episode_avg_speeds.append(system_metrics["system_mean_speed"])
+            if "system_total_stopped" in system_metrics:
+                episode_total_halts.append(system_metrics["system_total_stopped"])
+            if "system_throughput" in system_metrics:
+                episode_throughputs.append(system_metrics["system_throughput"])
+            if "system_mean_pressure" in system_metrics:
+                episode_mean_pressures.append(system_metrics["system_mean_pressure"])
             
             print(f"Episode {ep+1}/{num_episodes} (seed={eval_seed}): Raw Reward={total_raw_reward:.2f}, Normalized={total_reward:.2f}, Steps={step_count}")
         
@@ -515,6 +622,7 @@ def evaluate_mgmq(
         results = {
             "checkpoint": checkpoint_path,
             "network": network_name,
+            "num_seconds": int(env_config["num_seconds"]),
             "num_episodes": num_episodes,
             "eval_seeds": seeds,
             "mean_reward": float(np.mean(episode_rewards)),
@@ -614,7 +722,7 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint", type=str, required=True,
                         help="Path to checkpoint directory")
     parser.add_argument("--network", type=str, default=None,
-                        choices=["grid4x4", "4x4loop", "network_test", "zurich", "PhuQuoc", "test"],
+                        choices=["grid4x4", "4x4loop", "network_test", "zurich", "PhuQuoc", "test", "cologne3"],
                         help="Network name (if omitted, infer from checkpoint training config)")
     parser.add_argument("--episodes", type=int, default=10,
                         help="Number of evaluation episodes")
@@ -634,6 +742,12 @@ if __name__ == "__main__":
                         help="Path to model_config.yml (default: src/config/model_config.yml)")
     parser.add_argument("--cycle-time", type=int, default=None,
                         help="Override environment cycle_time only for evaluation")
+    parser.add_argument("--num-seconds", type=int, default=None,
+                        help="Override simulation duration for evaluation (seconds)")
+    parser.add_argument("--route-files", type=str, default=None,
+                        help="Optional comma-separated route files override")
+    parser.add_argument("--extra-additional-files", type=str, default=None,
+                        help="Optional comma-separated additional files (e.g. rerouter)")
     
     args = parser.parse_args()
     
@@ -648,4 +762,7 @@ if __name__ == "__main__":
         use_training_config=not args.no_training_config,
         config_path=args.config,
         cycle_time_override=args.cycle_time,
+        num_seconds_override=args.num_seconds,
+        route_files_override=args.route_files,
+        extra_additional_files=args.extra_additional_files,
     )

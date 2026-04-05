@@ -36,6 +36,15 @@ from src.config import (
 )
 
 
+SYSTEM_METRIC_KEYS = (
+    "system_total_waiting_time",
+    "system_mean_speed",
+    "system_total_stopped",
+    "system_throughput",
+    "system_mean_pressure",
+)
+
+
 def _resolve_eval_seeds(num_episodes: int, seeds: Optional[List[int]]) -> List[int]:
     """Resolve evaluation seeds from CLI args."""
     if num_episodes <= 0:
@@ -43,6 +52,56 @@ def _resolve_eval_seeds(num_episodes: int, seeds: Optional[List[int]]) -> List[i
     if seeds:
         return list(seeds)
     return [42 + i for i in range(num_episodes)]
+
+
+def _resolve_existing_files_csv(file_list: Optional[str], project_root: Path) -> List[str]:
+    """Resolve a comma-separated file list to absolute existing paths."""
+    if not file_list:
+        return []
+
+    resolved: List[str] = []
+    for raw_item in str(file_list).split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+
+        path = Path(item)
+        if not path.is_absolute():
+            candidate = project_root / path
+            if candidate.exists():
+                path = candidate
+
+        if not path.exists():
+            raise FileNotFoundError(f"Required file not found: {item}")
+
+        resolved.append(str(path.resolve()))
+
+    return resolved
+
+
+def _extract_system_metrics(info: Dict[str, Any], active_ts_ids: List[str]) -> Dict[str, float]:
+    """Extract system metrics from either top-level info or per-agent info dicts."""
+    if not isinstance(info, dict) or not info:
+        return {}
+
+    top_level_metrics = {k: info[k] for k in SYSTEM_METRIC_KEYS if k in info}
+    if top_level_metrics:
+        return top_level_metrics
+
+    for ts_id in active_ts_ids:
+        ts_info = info.get(ts_id)
+        if isinstance(ts_info, dict):
+            metrics = {k: ts_info[k] for k in SYSTEM_METRIC_KEYS if k in ts_info}
+            if metrics:
+                return metrics
+
+    for value in info.values():
+        if isinstance(value, dict):
+            metrics = {k: value[k] for k in SYSTEM_METRIC_KEYS if k in value}
+            if metrics:
+                return metrics
+
+    return {}
 
 
 def _load_json(path: Path) -> dict:
@@ -491,6 +550,9 @@ def evaluate_baseline(
     config_path: Optional[str] = None,
     controller: str = "max_pressure_native",
     mp_net_info: Optional[str] = None,
+    num_seconds_override: Optional[int] = None,
+    route_files_override: Optional[str] = None,
+    extra_additional_files: Optional[str] = None,
 ):
     """
     Evaluate baseline (no AI) traffic signal control.
@@ -508,9 +570,15 @@ def evaluate_baseline(
         config_path: Path to model_config.yml
         controller: Baseline controller ("fixed", "max_pressure_native", "max_pressure_legacy")
         mp_net_info: Optional explicit path to MP net-info.json
+        num_seconds_override: Optional simulation duration override for evaluation
+        route_files_override: Optional comma-separated route file paths override
+        extra_additional_files: Optional comma-separated additional file paths
     """
     seeds = _resolve_eval_seeds(num_episodes, seeds)
     num_episodes = len(seeds)
+
+    if num_seconds_override is not None and int(num_seconds_override) <= 0:
+        raise ValueError("num_seconds_override must be > 0")
 
     print("\n" + "="*80)
     print("BASELINE EVALUATION")
@@ -548,10 +616,24 @@ def evaluate_baseline(
     
     # Get network files
     net_file = network_cfg["net_file"]
-    route_file = network_cfg["route_file"]
+    if route_files_override:
+        route_parts = _resolve_existing_files_csv(route_files_override, project_root)
+        route_file = ",".join(route_parts)
+    else:
+        route_file = network_cfg["route_file"]
     preprocessing_config = network_cfg["intersection_config"]
     detector_file = network_cfg["detector_file"]
     network_name = network_cfg["network_name"]
+
+    detector_parts: List[str] = []
+    if detector_file:
+        try:
+            detector_parts = _resolve_existing_files_csv(detector_file, project_root)
+        except FileNotFoundError:
+            print(f"Warning: detector file not found, skipping: {detector_file}")
+
+    extra_additional_parts = _resolve_existing_files_csv(extra_additional_files, project_root)
+    additional_files = list(dict.fromkeys(detector_parts + extra_additional_parts))
     
     # Validate network files
     if not Path(net_file).exists():
@@ -560,6 +642,8 @@ def evaluate_baseline(
     print(f"[OK] Network: {network_name}")
     print(f"[OK] Network file: {net_file}")
     print(f"[OK] Route file: {route_file}")
+    if additional_files:
+        print(f"[OK] Additional files: {','.join(additional_files)}")
     
     if preprocessing_config and Path(preprocessing_config).exists():
         print(f"[OK] Preprocessing config: {preprocessing_config}")
@@ -576,14 +660,15 @@ def evaluate_baseline(
         "--step-length 1 "
         "--lateral-resolution 0.5 "
         "--ignore-route-errors "
+        "--ignore-junction-blocker 1 "
         "--tls.actuated.jam-threshold 30 "
         "--no-internal-links true "
         "--device.rerouting.adaptation-steps 18 "
         "--device.rerouting.adaptation-interval 10"
     )
-    if detector_file and Path(detector_file).exists():
-        additional_sumo_cmd = f"-a {detector_file} {additional_sumo_cmd}"
-        print(f"[OK] Detector file: {detector_file}")
+    if additional_files:
+        additional_sumo_cmd = f"-a {','.join(additional_files)} {additional_sumo_cmd}"
+        print(f"[OK] Additional inputs configured: {','.join(additional_files)}")
     
     # Print reward config
     print(f"[OK] Reward Function: {yaml_reward_cfg['reward_fn']}")
@@ -598,7 +683,7 @@ def evaluate_baseline(
         "use_gui": use_gui,
         "virtual_display": None,
         "render_mode": "human" if render else None,
-        "num_seconds": yaml_env_cfg["num_seconds"],
+        "num_seconds": int(num_seconds_override) if num_seconds_override is not None else int(yaml_env_cfg["num_seconds"]),
         "max_green": yaml_env_cfg["max_green"],
         "min_green": yaml_env_cfg["min_green"],
         "cycle_time": yaml_env_cfg["cycle_time"],
@@ -623,10 +708,13 @@ def evaluate_baseline(
         # We use fixed_ts stepping and optionally update phase durations via baseline controller.
         "fixed_ts": True,
     }
+
+    if num_seconds_override is not None:
+        print(f"[OK] Evaluation num_seconds override: {env_config['num_seconds']}")
     
-    expected_steps = yaml_env_cfg["num_seconds"] // yaml_env_cfg["cycle_time"]
-    print(f"\n[OK] Cycle time: {yaml_env_cfg['cycle_time']}s")
-    print(f"[OK] Simulation time: {yaml_env_cfg['num_seconds']}s")
+    expected_steps = int(env_config["num_seconds"]) // int(env_config["cycle_time"])
+    print(f"\n[OK] Cycle time: {env_config['cycle_time']}s")
+    print(f"[OK] Simulation time: {env_config['num_seconds']}s")
     print(f"[OK] Expected steps per episode: ~{expected_steps}")
     print("")
     
@@ -709,6 +797,7 @@ def evaluate_baseline(
         total_raw_reward = 0
         agent_rewards = {ts_id: 0 for ts_id in active_ts_ids}
         agent_raw_rewards = {ts_id: 0 for ts_id in active_ts_ids}
+        latest_system_metrics: Dict[str, float] = {}
         step_count = 0
         
         while not done.get("__all__", False):
@@ -738,6 +827,12 @@ def evaluate_baseline(
                 total_raw_reward += raw_r
                 if agent_id in agent_raw_rewards:
                     agent_raw_rewards[agent_id] += raw_r
+
+            # Keep the latest available system metrics across the episode.
+            # Terminal step info can be empty in MultiAgent wrappers.
+            step_system_metrics = _extract_system_metrics(info, active_ts_ids)
+            if step_system_metrics:
+                latest_system_metrics = step_system_metrics
             
             step_count += 1
             
@@ -755,17 +850,18 @@ def evaluate_baseline(
             if ts_id in agent_raw_rewards:
                 per_agent_raw_rewards[ts_id].append(agent_raw_rewards[ts_id])
         
-        # Get system metrics if available (SAME as eval_mgmq_ppo.py)
-        if "system_total_waiting_time" in info:
-            episode_waiting_times.append(info["system_total_waiting_time"])
-        if "system_mean_speed" in info:
-            episode_avg_speeds.append(info["system_mean_speed"])
-        if "system_total_stopped" in info:
-            episode_total_halts.append(info["system_total_stopped"])
-        if "system_throughput" in info:
-            episode_throughputs.append(info["system_throughput"])
-        if "system_mean_pressure" in info:
-            episode_mean_pressures.append(info["system_mean_pressure"])
+        # System metrics can be top-level or nested per-agent (RLlib wrapper).
+        system_metrics = latest_system_metrics
+        if "system_total_waiting_time" in system_metrics:
+            episode_waiting_times.append(system_metrics["system_total_waiting_time"])
+        if "system_mean_speed" in system_metrics:
+            episode_avg_speeds.append(system_metrics["system_mean_speed"])
+        if "system_total_stopped" in system_metrics:
+            episode_total_halts.append(system_metrics["system_total_stopped"])
+        if "system_throughput" in system_metrics:
+            episode_throughputs.append(system_metrics["system_throughput"])
+        if "system_mean_pressure" in system_metrics:
+            episode_mean_pressures.append(system_metrics["system_mean_pressure"])
         
         print(f"Episode {ep+1}/{num_episodes} (seed={eval_seed}): Raw Reward={total_raw_reward:.2f}, Normalized={total_reward:.2f}, Steps={step_count}")
     
@@ -775,6 +871,7 @@ def evaluate_baseline(
     results = {
         "network": network_name,
         "controller": controller_name,
+        "num_seconds": int(env_config["num_seconds"]),
         "num_episodes": num_episodes,
         "eval_seeds": seeds,
         "mean_reward": float(np.mean(episode_rewards)),
@@ -878,7 +975,7 @@ if __name__ == "__main__":
         description="Evaluate baseline traffic signal control (fixed-time or max_pressure)"
     )
     parser.add_argument("--network", type=str, default=None,
-                        choices=["grid4x4", "4x4loop", "network_test", "zurich", "PhuQuoc", "test"],
+                        choices=["grid4x4", "4x4loop", "network_test", "zurich", "PhuQuoc", "test", "cologne3"],
                         help="Network name (if omitted, use network from config)")
     parser.add_argument("--episodes", type=int, default=5,
                         help="Number of evaluation episodes")
@@ -895,8 +992,14 @@ if __name__ == "__main__":
                         help="Baseline controller type")
     parser.add_argument("--mp-net-info", type=str, default=None,
                         help="Optional explicit path to MP net-info.json")
+    parser.add_argument("--num-seconds", type=int, default=None,
+                        help="Override simulation duration for evaluation (seconds)")
     parser.add_argument("--config", type=str, default=None,
                         help="Path to model_config.yml (default: src/config/model_config.yml)")
+    parser.add_argument("--route-files", type=str, default=None,
+                        help="Optional comma-separated route files override")
+    parser.add_argument("--extra-additional-files", type=str, default=None,
+                        help="Optional comma-separated additional files (e.g. rerouter)")
     
     args = parser.parse_args()
     
@@ -910,5 +1013,8 @@ if __name__ == "__main__":
         config_path=args.config,
         controller=args.controller,
         mp_net_info=args.mp_net_info,
+        num_seconds_override=args.num_seconds,
+        route_files_override=args.route_files,
+        extra_additional_files=args.extra_additional_files,
     )
     

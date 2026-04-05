@@ -6,20 +6,20 @@
 # ============================================
 network:
   # Name of the traffic network (used as folder name under network/)
-  name: zurich
+  name: cologne3
 
   # Base path for network files (relative to project root)
   # If not specified, defaults to: network/{network_name}/
   base_path: null
 
   # Network files (relative to base_path if base_path is set, or absolute paths)
-  net_file: zurich.net.xml
+  net_file: cologne3.net.xml
 
   # Route files - can be a single file or comma-separated list
   # Order matters: type definitions should come before trip definitions
   route_files:
-    - zurich.rou.xml       # Vehicle type definitions (vTypes only)
-    - zurich-demo.rou.xml  # Trips (3052 vehicles, depart up to 3597s)
+    - cologne3.rou.xml       # Vehicle type definitions (vTypes only)
+    - cologne3-demo.rou.xml  # Trips (3052 vehicles, depart up to 3597s)
 
   # Detector configuration file (for E2 detector-based rewards)
   detector_file: detector.add.xml
@@ -93,8 +93,8 @@ ppo:
   # With num_seconds=3600, cycle_time=90: ~40 steps/episode, 16 agents
   # 1 episode = 40*16 = 640 agent_steps. 4 episodes = 2560
   # Heavy traffic (36k veh) is slow to simulate → keep batch small to avoid timeout
-  train_batch_size: 4640 # 4 episodes/batch: 40steps * 16agents = 640/ep
-  minibatch_size: 1160 # SGD minibatch size
+  train_batch_size: 3600 # 4 episodes/batch: 40steps * 16agents = 640/ep
+  minibatch_size: 400 # SGD minibatch size
   num_sgd_iter: 6 # Number of SGD epochs per training batch
   grad_clip: 10.0 # Gradient clipping (standard for GNN models)
 
@@ -106,6 +106,7 @@ training:
   num_workers: 4 # Parallel SUMO workers
   num_envs_per_worker: 1 # Environments per worker
   checkpoint_interval: 5 # Checkpoint frequency
+  checkpoint_num_to_keep: 20 # Keep only N newest checkpoints (increase to keep older iters)
   patience: 500 # Early stopping patience
   seed: 42 # Random seed
   use_gpu: false # Use GPU for training
@@ -167,7 +168,7 @@ action:
 # Environment Configuration
 # ============================================
 environment:
-  num_seconds: 3600 # Simulation duration (30 minutes)
+  num_seconds: 7200 # Simulation duration (30 minutes)
   max_green: 65     # With cycle_time=90 and yellow=3 (4 phases): total_green=96s, max_green=96-3*5=81s
   min_green: 5      # Minimum green time per phase (SUMO actual minimum: 6s)
   cycle_time: 90   # Shorter cycle for faster reaction and denser learning signal

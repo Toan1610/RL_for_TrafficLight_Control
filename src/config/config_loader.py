@@ -143,6 +143,7 @@ def get_training_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "num_workers": training.get("num_workers", 2),
         "num_envs_per_worker": training.get("num_envs_per_worker", 1),
         "checkpoint_interval": training.get("checkpoint_interval", 20),
+        "checkpoint_num_to_keep": training.get("checkpoint_num_to_keep", 5),
         "patience": training.get("patience", 50),
         "seed": training.get("seed", 42),
         "use_gpu": training.get("use_gpu", False),
